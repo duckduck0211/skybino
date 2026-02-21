@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MedApp – Praxisverwaltung",
-  description: "Moderne Praxisverwaltung für Mediziner",
+  title: "Synapze – Smarter lernen",
+  description: "Die moderne Lernkarten-App für alle Fächer",
 };
 
 export default function RootLayout({

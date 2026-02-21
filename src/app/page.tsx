@@ -1,126 +1,258 @@
-import { Users, CalendarDays, Pill, FileText, Activity, Clock } from "lucide-react";
-import { StatsCard } from "@/components/dashboard/stats-card";
-import { RecentActivity } from "@/components/dashboard/recent-activity";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { BookOpen, Zap, Target, Plus } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { decks, getTotalCards, getTotalMastered } from "@/lib/data";
 
-const upcomingAppointments = [
-  { time: "09:00", patient: "Lisa Bubulash", type: "Allgemein", status: "Bestätigt" },
-  { time: "10:30", patient: "Klaus Müller", type: "Nachsorge", status: "Bestätigt" },
-  { time: "11:00", patient: "Maria Weber", type: "Erstuntersuchung", status: "Ausstehend" },
-  { time: "14:00", patient: "Thomas Bauer", type: "Blutabnahme", status: "Bestätigt" },
-];
+const categories = ["Alle", ...Array.from(new Set(decks.map((d) => d.category)))];
 
-export default function DashboardPage() {
-  const today = new Date().toLocaleDateString("de-DE", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+export default function HomePage() {
+  const [activeTab, setActiveTab] = useState<"overview" | "decks">("overview");
+  const [selectedCategory, setSelectedCategory] = useState("Alle");
+
+  const recentDecks = decks.filter((d) => d.lastStudied);
+  const totalCards = getTotalCards();
+  const totalMastered = getTotalMastered();
+
+  const filteredDecks =
+    selectedCategory === "Alle"
+      ? decks
+      : decks.filter((d) => d.category === selectedCategory);
 
   return (
     <div className="space-y-6">
-      {/* Begrüßung */}
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Guten Morgen, Dr. Mustermann</h2>
-        <p className="text-muted-foreground">{today}</p>
-      </div>
+      {/* Hero Greeting */}
+      <div className="rounded-2xl bg-gradient-to-r from-primary to-violet-400 p-6 text-white shadow-lg">
+        <p className="text-sm font-medium opacity-80">Guten Morgen,</p>
+        <h2 className="mt-0.5 text-3xl font-bold">Mert! 👋</h2>
+        <p className="mt-1 text-sm opacity-75">Du hast heute noch nicht gelernt. Leg los!</p>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatsCard
-          title="Gesamtpatienten"
-          value="1.248"
-          description="Registrierte Patienten"
-          icon={Users}
-          trend={{ value: "+12%", positive: true }}
-        />
-        <StatsCard
-          title="Heutige Termine"
-          value="8"
-          description="4 noch ausstehend"
-          icon={CalendarDays}
-          trend={{ value: "+2", positive: true }}
-        />
-        <StatsCard
-          title="Aktive Rezepte"
-          value="342"
-          description="Laufende Verschreibungen"
-          icon={Pill}
-          trend={{ value: "-5%", positive: false }}
-        />
-        <StatsCard
-          title="Offene Berichte"
-          value="7"
-          description="Warten auf Freigabe"
-          icon={FileText}
-          trend={{ value: "+3", positive: false }}
-        />
-      </div>
-
-      {/* Unterer Bereich */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Heutige Termine */}
-        <Card className="lg:col-span-1">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-base">Heutige Termine</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {upcomingAppointments.map((appt, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <div className="w-12 shrink-0">
-                  <span className="text-sm font-mono font-medium text-muted-foreground">
-                    {appt.time}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{appt.patient}</p>
-                  <p className="text-xs text-muted-foreground">{appt.type}</p>
-                </div>
-                <Badge
-                  variant={appt.status === "Bestätigt" ? "default" : "secondary"}
-                  className="text-xs shrink-0"
-                >
-                  {appt.status}
-                </Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {/* Letzte Aktivitäten */}
-        <div className="lg:col-span-2">
-          <RecentActivity />
+        <div className="mt-5 flex flex-wrap gap-4">
+          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
+            <span className="text-xl">🔥</span>
+            <div>
+              <p className="text-lg font-bold leading-none">3</p>
+              <p className="text-xs opacity-80">Tage Streak</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
+            <BookOpen className="h-5 w-5" />
+            <div>
+              <p className="text-lg font-bold leading-none">{decks.length}</p>
+              <p className="text-xs opacity-80">Decks</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
+            <Zap className="h-5 w-5" />
+            <div>
+              <p className="text-lg font-bold leading-none">{totalCards}</p>
+              <p className="text-xs opacity-80">Karten</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
+            <Target className="h-5 w-5" />
+            <div>
+              <p className="text-lg font-bold leading-none">{totalMastered}</p>
+              <p className="text-xs opacity-80">Gemeistert</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Quick Stats */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Activity className="h-4 w-4" />
-            Praxis-Übersicht
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-lg bg-muted/50 p-4 text-center">
-              <p className="text-3xl font-bold text-primary">98%</p>
-              <p className="mt-1 text-sm text-muted-foreground">Patientenzufriedenheit</p>
-            </div>
-            <div className="rounded-lg bg-muted/50 p-4 text-center">
-              <p className="text-3xl font-bold text-primary">12 Min.</p>
-              <p className="mt-1 text-sm text-muted-foreground">Ø Wartezeit heute</p>
-            </div>
-            <div className="rounded-lg bg-muted/50 p-4 text-center">
-              <p className="text-3xl font-bold text-primary">2</p>
-              <p className="mt-1 text-sm text-muted-foreground">Dringende Fälle</p>
-            </div>
+      {/* Tabs */}
+      <div className="border-b">
+        <div className="flex gap-1">
+          <button
+            onClick={() => setActiveTab("overview")}
+            className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px ${
+              activeTab === "overview"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Übersicht
+          </button>
+          <button
+            onClick={() => setActiveTab("decks")}
+            className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px ${
+              activeTab === "decks"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Meine Decks
+            <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+              {decks.length}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Tab: Übersicht */}
+      {activeTab === "overview" && (
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Weitermachen</h3>
+            <button
+              onClick={() => setActiveTab("decks")}
+              className="text-sm text-primary hover:underline"
+            >
+              Alle Decks →
+            </button>
           </div>
-        </CardContent>
-      </Card>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {recentDecks.slice(0, 3).map((deck) => (
+              <Card key={deck.id} className="group overflow-hidden border hover:shadow-md transition-shadow">
+                <CardContent className="p-0">
+                  <div className={`${deck.color} flex h-2 w-full`} />
+                  <div className="p-4">
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl">{deck.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold truncate">{deck.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {deck.cards.length} Karten · {deck.lastStudied}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="mb-1 flex justify-between text-xs text-muted-foreground">
+                        <span>{deck.masteredCount} gemeistert</span>
+                        <span>{Math.round((deck.masteredCount / deck.cards.length) * 100)}%</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted">
+                        <div
+                          className={`h-1.5 rounded-full ${deck.color} transition-all`}
+                          style={{ width: `${(deck.masteredCount / deck.cards.length) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex gap-2">
+                      <Button asChild size="sm" className="flex-1">
+                        <Link href={`/study/${deck.id}`}>Lernen</Link>
+                      </Button>
+                      <Button asChild size="sm" variant="outline" className="flex-1">
+                        <Link href={`/quiz/${deck.id}`}>Quiz</Link>
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Tab: Meine Decks */}
+      {activeTab === "decks" && (
+        <div className="space-y-5">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {decks.length} Decks · {decks.reduce((s, d) => s + d.cards.length, 0)} Karten insgesamt
+            </p>
+            <Button asChild size="sm">
+              <Link href="/create">
+                <Plus className="mr-2 h-4 w-4" />
+                Neues Deck
+              </Link>
+            </Button>
+          </div>
+
+          {/* Category Filter */}
+          <div className="flex flex-wrap gap-2">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
+                  selectedCategory === cat
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* Decks Grid */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredDecks.map((deck) => (
+              <Card key={deck.id} className="group overflow-hidden border hover:shadow-md transition-all">
+                <CardContent className="p-0">
+                  <div className={`${deck.color} h-1.5 w-full`} />
+                  <div className="p-5">
+                    <div className="flex items-start gap-3">
+                      <span className="text-3xl">{deck.emoji}</span>
+                      <div>
+                        <p className="font-semibold leading-tight">{deck.title}</p>
+                        <Badge variant="secondary" className="mt-1 text-xs">
+                          {deck.category}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <p className="mt-2 text-sm text-muted-foreground line-clamp-2">{deck.description}</p>
+
+                    <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <BookOpen className="h-3.5 w-3.5" />
+                        {deck.cards.length} Karten
+                      </span>
+                      {deck.lastStudied && <span>· Zuletzt: {deck.lastStudied}</span>}
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="mb-1.5 flex justify-between text-xs text-muted-foreground">
+                        <span>{deck.masteredCount} / {deck.cards.length} gemeistert</span>
+                        <span className="font-medium">
+                          {Math.round((deck.masteredCount / deck.cards.length) * 100)}%
+                        </span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={`h-2 rounded-full ${deck.color} transition-all duration-500`}
+                          style={{ width: `${(deck.masteredCount / deck.cards.length) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex gap-2">
+                      <Button asChild className="flex-1" size="sm">
+                        <Link href={`/study/${deck.id}`}>Lernen</Link>
+                      </Button>
+                      <Button asChild variant="outline" className="flex-1" size="sm">
+                        <Link href={`/quiz/${deck.id}`}>Quiz</Link>
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            {/* Add Deck Card */}
+            <Link href="/create">
+              <Card className="group flex h-full min-h-[200px] items-center justify-center border-2 border-dashed border-muted hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-2 p-6 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted group-hover:bg-primary/10 transition-colors">
+                    <Plus className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                  <p className="font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                    Neues Deck erstellen
+                  </p>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

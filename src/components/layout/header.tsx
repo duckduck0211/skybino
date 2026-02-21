@@ -1,9 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Bell, Menu, Search } from "lucide-react";
+import { Bell, Menu, Search, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
@@ -16,16 +15,16 @@ import { AppSidebar } from "./app-sidebar";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
-  "/patients": "Patienten",
-  "/appointments": "Termine",
-  "/medications": "Medikamente",
-  "/reports": "Berichte",
+  "/decks": "Meine Decks",
+  "/create": "Deck erstellen",
+  "/explore": "Entdecken",
+  "/progress": "Fortschritt",
   "/settings": "Einstellungen",
 };
 
 export function Header() {
   const pathname = usePathname();
-  const title = pageTitles[pathname] ?? "MedApp";
+  const title = pageTitles[pathname] ?? "Synapze";
 
   return (
     <header className="flex h-16 items-center gap-4 border-b bg-background px-6">
@@ -37,7 +36,7 @@ export function Header() {
             <span className="sr-only">Menü öffnen</span>
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="p-0 w-64">
+        <SheetContent side="left" className="w-64 p-0">
           <SheetHeader className="sr-only">
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
@@ -45,10 +44,19 @@ export function Header() {
         </SheetContent>
       </Sheet>
 
+      {/* Mobile Logo */}
+      <div className="flex items-center gap-2 md:hidden">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
+          <Zap className="h-3.5 w-3.5 text-primary-foreground" fill="currentColor" />
+        </div>
+        <span className="font-bold">Synapze</span>
+      </div>
+
       {/* Page Title */}
-      <div className="flex-1">
+      <div className="hidden flex-1 md:block">
         <h1 className="text-lg font-semibold">{title}</h1>
       </div>
+      <div className="flex-1 md:hidden" />
 
       {/* Search */}
       <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
@@ -62,18 +70,15 @@ export function Header() {
           <Bell className="h-5 w-5" />
           <span className="sr-only">Benachrichtigungen</span>
         </Button>
-        <Badge className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-[10px]">
-          3
+        <Badge className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center p-0 text-[10px]">
+          2
         </Badge>
       </div>
 
       {/* User Avatar */}
-      <Avatar className="h-8 w-8 cursor-pointer">
-        <AvatarImage src="" />
-        <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
-          DR
-        </AvatarFallback>
-      </Avatar>
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary cursor-pointer">
+        MB
+      </div>
     </header>
   );
 }
