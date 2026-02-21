@@ -1,574 +1,405 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { BookOpen, Zap, Target, Plus, Flame, Shield, Trophy } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Brain,
+  Calendar,
+  Clock,
+  Zap,
+  Shuffle,
+  HelpCircle,
+  Timer,
+  ArrowRight,
+  BookOpen,
+  Upload,
+  Layers,
+  Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { decks, getTotalCards, getTotalMastered } from "@/lib/data";
+import { AuroraBackground } from "@/components/aurora-background";
+import { FeatureCard, featureTooltips } from "@/components/feature-card";
 
-const categories = ["Alle", ...Array.from(new Set(decks.map((d) => d.category)))];
+// ─── Data ─────────────────────────────────────────────────────────────────────
 
-// ─── Mock heatmap data (last 16 weeks) ────────────────────────────────────────
+const stats = [
+  { value: "70%", label: "des Gelernten", sublabel: "vergessen nach 24h" },
+  { value: "2×", label: "effektiver", sublabel: "als passives Lesen" },
+  { value: "6×", label: "Wiederholungen", sublabel: "fürs Langzeitgedächtnis" },
+];
 
-interface HeatCell {
-  date: string;       // "12. Feb."
-  fullDate: string;   // "Freitag, 12. Februar 2026"
-  level: 0 | 1 | 2 | 3 | 4;
-  cards: number;      // exact cards learned that day
-}
+const features = [
+  {
+    icon: Brain,
+    bg: "bg-violet-500",
+    glow: "shadow-violet-500/30",
+    title: "Active Recall",
+    desc: "Abrufen statt Lesen. Synapzen wachsen durch Erinnerung.",
+  },
+  {
+    icon: Calendar,
+    bg: "bg-blue-500",
+    glow: "shadow-blue-500/30",
+    title: "Spaced Repetition",
+    desc: "Kurz vor dem Vergessen wiederholen — automatisch.",
+  },
+  {
+    icon: HelpCircle,
+    bg: "bg-emerald-500",
+    glow: "shadow-emerald-500/30",
+    title: "Feynman-Technik",
+    desc: "KI erklärt jeden Begriff auf Level 1, 2 oder 3.",
+  },
+  {
+    icon: Timer,
+    bg: "bg-rose-500",
+    glow: "shadow-rose-500/30",
+    title: "Pomodoro",
+    desc: "Fokus-Sessions mit eingebautem Timer und Pausen.",
+  },
+  {
+    icon: Clock,
+    bg: "bg-amber-500",
+    glow: "shadow-amber-500/30",
+    title: "Parkinsons Gesetz",
+    desc: "Zeitdruck macht aus 3 Stunden 30 Minuten.",
+  },
+  {
+    icon: Shuffle,
+    bg: "bg-teal-500",
+    glow: "shadow-teal-500/30",
+    title: "Interleaved Practice",
+    desc: "Themen mischen — fühlt sich schwerer an, wirkt besser.",
+  },
+];
 
-// Deterministic card count per level (varied by index)
-function cardsForLevel(level: number, i: number): number {
-  if (level === 0) return 0;
-  const base = [0, 5, 16, 31, 52][level];
-  const range = [0, 10, 14, 18, 24][level];
-  return base + ((i * 13 + 7) % (range + 1));
-}
+const steps = [
+  {
+    icon: Upload,
+    bg: "bg-violet-500",
+    glow: "shadow-violet-500/40",
+    step: "01",
+    title: "Lade deinen Inhalt hoch",
+    desc: "PDF, Buchseite, Mitschrift — Synapze liest alles.",
+  },
+  {
+    icon: Zap,
+    bg: "bg-primary",
+    glow: "shadow-primary/40",
+    step: "02",
+    title: "KI erstellt deine Karten",
+    desc: "Präzise Fragen und Antworten aus deinem Material.",
+  },
+  {
+    icon: Layers,
+    bg: "bg-emerald-500",
+    glow: "shadow-emerald-500/40",
+    step: "03",
+    title: "Du lernst mit System",
+    desc: "Active Recall und Spaced Repetition — automatisch.",
+  },
+];
 
-function generateHeatmapData(): HeatCell[] {
-  const today = new Date();
-  const cells: HeatCell[] = [];
-  const startDate = new Date(today);
-  startDate.setDate(today.getDate() - 111);
-
-  const activitySeeds = [
-    0,0,1,0,2,0,0,
-    0,1,0,0,3,0,0,
-    2,0,0,1,0,2,0,
-    0,0,3,0,0,1,0,
-    1,2,0,0,2,0,0,
-    0,1,0,2,0,0,1,
-    2,0,1,0,3,1,0,
-    0,0,2,1,0,2,0,
-    1,3,0,2,1,0,0,
-    2,0,3,0,2,3,0,
-    0,2,1,3,2,0,1,
-    3,1,0,2,3,1,0,
-    2,3,1,2,0,3,2,
-    3,2,3,1,2,3,0,
-    2,3,2,0,3,2,3,
-    0,0,0,0,4,4,4,
+// ─── Ebbinghaus Curve SVG ─────────────────────────────────────────────────────
+// y(pct) = 175 - (pct/100)*155  →  chart area top=20, bottom=175, height=155
+// x-axis: Start=50, 20Min=108, 1Std=155, Tag1=235, Tag3=308, Tag7=390, Tag14=463, Tag30=560
+function EbbinghausCurve() {
+  const gridPcts = [25, 50, 75, 100];
+  const xLabels = [
+    { x: 50, label: "Lernen" },
+    { x: 108, label: "20 Min" },
+    { x: 155, label: "1 Std" },
+    { x: 235, label: "Tag 1" },
+    { x: 308, label: "Tag 3" },
+    { x: 390, label: "Tag 7" },
+    { x: 463, label: "Tag 14" },
+    { x: 560, label: "Tag 30" },
+  ];
+  // Review dots: shown at the peak after each review
+  const reviewDots = [
+    { x: 237, y: 36 },
+    { x: 310, y: 32 },
+    { x: 392, y: 29 },
+    { x: 465, y: 26 },
   ];
 
-  for (let i = 0; i < 112; i++) {
-    const d = new Date(startDate);
-    d.setDate(startDate.getDate() + i);
-    const level = (activitySeeds[i] ?? 0) as 0 | 1 | 2 | 3 | 4;
-    const cards = cardsForLevel(level, i);
-    cells.push({
-      date: d.toLocaleDateString("de-DE", { day: "2-digit", month: "short" }),
-      fullDate: d.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
-      level,
-      cards,
-    });
-  }
-  return cells;
-}
-
-const heatmapData = generateHeatmapData();
-const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-
-const heatColors = [
-  "bg-muted hover:bg-muted/70",
-  "bg-violet-200 dark:bg-violet-900 hover:ring-2 hover:ring-violet-300",
-  "bg-violet-400 dark:bg-violet-700 hover:ring-2 hover:ring-violet-400",
-  "bg-violet-500 hover:ring-2 hover:ring-violet-400",
-  "bg-primary hover:ring-2 hover:ring-primary/60",
-];
-
-const levelLabels = ["Kein Lernen", "Leicht gelernt", "Gut gelernt", "Viel gelernt", "Top-Tag! 🔥"];
-
-// Split into weeks (columns of 7)
-function getWeeks() {
-  const weeks: HeatCell[][] = [];
-  for (let w = 0; w < 16; w++) {
-    weeks.push(heatmapData.slice(w * 7, w * 7 + 7));
-  }
-  return weeks;
-}
-
-const weeks = getWeeks();
-
-// Month labels for the top of the heatmap
-function getMonthLabels() {
-  const labels: { label: string; col: number }[] = [];
-  let lastMonth = "";
-  weeks.forEach((week, wi) => {
-    const firstDay = week[0];
-    const month = firstDay?.date.split(" ")[1] ?? "";
-    if (month !== lastMonth) {
-      labels.push({ label: month, col: wi });
-      lastMonth = month;
-    }
-  });
-  return labels;
-}
-
-const monthLabels = getMonthLabels();
-
-// ─── Streak milestones ─────────────────────────────────────────────────────────
-const streakMilestones = [
-  { days: 7, label: "1 Woche", emoji: "⭐" },
-  { days: 30, label: "1 Monat", emoji: "🔥" },
-  { days: 100, label: "100 Tage", emoji: "💎" },
-  { days: 365, label: "1 Jahr", emoji: "🏆" },
-];
-const currentStreak = 3;
-const nextMilestone = streakMilestones.find((m) => m.days > currentStreak) ?? streakMilestones[0];
-const progressToNext = Math.round((currentStreak / nextMilestone.days) * 100);
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<"overview" | "decks">("overview");
-  const [selectedCategory, setSelectedCategory] = useState("Alle");
-  const [selectedCell, setSelectedCell] = useState<HeatCell | null>(null);
-
-  const recentDecks = decks.filter((d) => d.lastStudied);
-  const totalCards = getTotalCards();
-  const totalMastered = getTotalMastered();
-
-  const filteredDecks =
-    selectedCategory === "Alle"
-      ? decks
-      : decks.filter((d) => d.category === selectedCategory);
-
   return (
-    <div className="space-y-6">
-      {/* ── Hero Greeting ── */}
-      <div className="rounded-2xl bg-gradient-to-r from-primary to-violet-400 p-6 text-white shadow-lg">
-        <p className="text-sm font-medium opacity-80">Guten Morgen,</p>
-        <h2 className="mt-0.5 text-3xl font-bold">Mert! 👋</h2>
-        <p className="mt-1 text-sm opacity-75">Du hast heute noch nicht gelernt. Leg los!</p>
+    <svg viewBox="0 0 590 200" className="w-full" aria-label="Vergessenskurve Ebbinghaus">
+      {/* Horizontal grid lines */}
+      {gridPcts.map((pct) => {
+        const y = 175 - (pct / 100) * 155;
+        return (
+          <line key={pct} x1="50" y1={y} x2="565" y2={y}
+            stroke="white" strokeOpacity="0.06" strokeWidth="1" />
+        );
+      })}
 
-        <div className="mt-5 flex flex-wrap gap-4">
-          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
-            <span className="text-xl">🔥</span>
-            <div>
-              <p className="text-lg font-bold leading-none">{currentStreak}</p>
-              <p className="text-xs opacity-80">Tage Streak</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
-            <BookOpen className="h-5 w-5" />
-            <div>
-              <p className="text-lg font-bold leading-none">{decks.length}</p>
-              <p className="text-xs opacity-80">Decks</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
-            <Zap className="h-5 w-5" />
-            <div>
-              <p className="text-lg font-bold leading-none">{totalCards}</p>
-              <p className="text-xs opacity-80">Karten</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-xl bg-white/20 px-4 py-2">
-            <Target className="h-5 w-5" />
-            <div>
-              <p className="text-lg font-bold leading-none">{totalMastered}</p>
-              <p className="text-xs opacity-80">Gemeistert</p>
-            </div>
-          </div>
-        </div>
+      {/* Y-axis labels */}
+      {gridPcts.map((pct) => {
+        const y = 175 - (pct / 100) * 155;
+        return (
+          <text key={pct} x="44" y={y + 4} textAnchor="end"
+            fontSize="9" fill="white" fillOpacity="0.35">
+            {pct}%
+          </text>
+        );
+      })}
+
+      {/* X-axis baseline */}
+      <line x1="50" y1="175" x2="565" y2="175"
+        stroke="white" strokeOpacity="0.15" strokeWidth="1" />
+
+      {/* X-axis labels */}
+      {xLabels.map(({ x, label }) => (
+        <text key={label} x={x} y="190" textAnchor="middle"
+          fontSize="9" fill="white" fillOpacity="0.35">
+          {label}
+        </text>
+      ))}
+
+      {/* Review guide lines (dotted violet) */}
+      {[235, 308, 390, 463].map((x) => (
+        <line key={x} x1={x} y1="20" x2={x} y2="175"
+          stroke="#a78bfa" strokeOpacity="0.18" strokeWidth="1" strokeDasharray="3,3" />
+      ))}
+
+      {/* ── Decay curve (without Synapze) ── */}
+      {/* Fill */}
+      <path
+        d="M 50,20 C 78,52 96,76 108,85 C 130,97 145,104 155,107 C 190,117 220,122 235,124 C 270,129 295,131 308,132 C 350,134 375,135 390,136 C 425,138 448,140 463,141 C 500,141 535,142 565,143 L 565,175 L 50,175 Z"
+        fill="#f43f5e" fillOpacity="0.1"
+      />
+      {/* Stroke */}
+      <path
+        d="M 50,20 C 78,52 96,76 108,85 C 130,97 145,104 155,107 C 190,117 220,122 235,124 C 270,129 295,131 308,132 C 350,134 375,135 390,136 C 425,138 448,140 463,141 C 500,141 535,142 565,143"
+        fill="none" stroke="#f43f5e" strokeWidth="2" strokeLinecap="round"
+      />
+
+      {/* ── Synapze curve (with Spaced Repetition) ── */}
+      {/* Fill */}
+      <path
+        d="M 50,20 C 100,38 180,60 233,79 L 237,36 C 265,46 290,55 306,60 L 310,32 C 345,38 370,45 388,51 L 392,29 C 420,34 445,39 461,43 L 465,26 C 505,32 540,38 565,43 L 565,175 L 50,175 Z"
+        fill="#8b5cf6" fillOpacity="0.14"
+      />
+      {/* Stroke */}
+      <path
+        d="M 50,20 C 100,38 180,60 233,79 L 237,36 C 265,46 290,55 306,60 L 310,32 C 345,38 370,45 388,51 L 392,29 C 420,34 445,39 461,43 L 465,26 C 505,32 540,38 565,43"
+        fill="none" stroke="#8b5cf6" strokeWidth="2.5" strokeLinecap="round"
+      />
+
+      {/* Review dots */}
+      {reviewDots.map(({ x, y }) => (
+        <g key={x}>
+          <circle cx={x} cy={y} r="5" fill="#8b5cf6" />
+          <circle cx={x} cy={y} r="2.5" fill="white" fillOpacity="0.9" />
+        </g>
+      ))}
+
+      {/* End callouts */}
+      <text x="571" y="147" fontSize="10" fontWeight="bold" fill="#f43f5e">~21%</text>
+      <text x="571" y="47" fontSize="10" fontWeight="bold" fill="#a78bfa">~85%</text>
+    </svg>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function LandingPage() {
+  return (
+    <div className="relative -mx-6 -mt-6 bg-[#020008]">
+
+      {/* Aurora Background */}
+      <div
+        className="pointer-events-none w-full"
+        style={{ position: "sticky", top: 0, height: "100vh", marginBottom: "-100vh", zIndex: 0 }}
+      >
+        <AuroraBackground className="absolute inset-0 h-full w-full" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#020008]/40 to-[#020008]/90" />
       </div>
 
-      {/* ── Tabs ── */}
-      <div className="border-b">
-        <div className="flex gap-1">
-          <button
-            onClick={() => setActiveTab("overview")}
-            className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px ${
-              activeTab === "overview"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Übersicht
-          </button>
-          <button
-            onClick={() => setActiveTab("decks")}
-            className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px ${
-              activeTab === "decks"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Meine Decks
-            <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-              {decks.length}
-            </span>
-          </button>
-        </div>
-      </div>
+      <div className="relative z-10 px-6 pb-24">
 
-      {/* ── Tab: Übersicht ── */}
-      {activeTab === "overview" && (
-        <div className="space-y-6">
-
-          {/* ── Streak + Heatmap ── */}
-          <Card className="overflow-hidden border">
-            <CardContent className="p-0">
-              {/* Streak header */}
-              <div className="flex items-stretch gap-0 border-b">
-                {/* Flame section */}
-                <div className="flex flex-col items-center justify-center gap-1 border-r px-8 py-5">
-                  <div className="relative">
-                    <Flame className="h-12 w-12 text-orange-500 drop-shadow-[0_0_8px_rgba(251,146,60,0.6)]" fill="currentColor" />
-                    <div className="absolute inset-0 flex items-center justify-center pt-2">
-                      <span className="text-sm font-black text-white">{currentStreak}</span>
-                    </div>
-                  </div>
-                  <p className="text-xs font-semibold text-muted-foreground">Tage Streak</p>
-                </div>
-
-                {/* Streak info + milestones */}
-                <div className="flex flex-1 flex-col justify-center gap-3 px-6 py-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold">Nächster Meilenstein</p>
-                      <p className="text-xs text-muted-foreground">
-                        {nextMilestone.emoji} {nextMilestone.label} — noch {nextMilestone.days - currentStreak} Tage
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      {streakMilestones.map((m) => (
-                        <div
-                          key={m.days}
-                          title={`${m.label}: ${m.days} Tage`}
-                          className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-all ${
-                            currentStreak >= m.days
-                              ? "bg-orange-100 dark:bg-orange-900/40 ring-2 ring-orange-400"
-                              : "bg-muted opacity-40"
-                          }`}
-                        >
-                          {m.emoji}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Progress bar to next milestone */}
-                  <div>
-                    <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-                      <span>{currentStreak} / {nextMilestone.days} Tage</span>
-                      <span>{progressToNext}%</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-2 rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all"
-                        style={{ width: `${progressToNext}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Streak shield */}
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Shield className="h-3.5 w-3.5 text-blue-500" />
-                    <span>Streak-Schutz: <span className="font-medium text-foreground">1 verfügbar</span></span>
-                    <span className="text-muted-foreground/60">— schützt deinen Streak bei einem verpassten Tag</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Activity Heatmap ── */}
-              <div className="px-6 py-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-semibold">Lernaktivität</p>
-                  <p className="text-xs text-muted-foreground">Letzte 16 Wochen</p>
-                </div>
-
-                {/* ── Selected cell info panel ── */}
-                {selectedCell ? (
-                  <div className="mb-4 flex items-center gap-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
-                    <div className={`h-8 w-8 shrink-0 rounded-lg ${heatColors[selectedCell.level].split(" ")[0]}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold">{selectedCell.fullDate}</p>
-                      <p className="text-xs text-muted-foreground">{levelLabels[selectedCell.level]}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      {selectedCell.cards > 0 ? (
-                        <>
-                          <p className="text-lg font-bold text-primary leading-none">{selectedCell.cards}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">Karten gelernt</p>
-                        </>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">Kein Lernen</p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => setSelectedCell(null)}
-                      className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                      aria-label="Schließen"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <p className="mb-4 text-xs text-muted-foreground">
-                    Klicke auf einen Tag, um Details zu sehen.
-                  </p>
-                )}
-
-                <div className="overflow-x-auto">
-                  <div className="min-w-max">
-                    {/* Month labels */}
-                    <div className="mb-1 flex gap-1 pl-8">
-                      {weeks.map((_, wi) => {
-                        const label = monthLabels.find((m) => m.col === wi);
-                        const isNewMonth = wi > 0 && label != null;
-                        return (
-                          <div
-                            key={wi}
-                            className={`w-3 leading-none ${isNewMonth ? "ml-2" : ""} ${label ? "text-[9px] font-semibold text-foreground" : "text-[9px] text-muted-foreground"}`}
-                          >
-                            {label ? label.label : ""}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Grid: rows = days of week, cols = weeks */}
-                    <div className="flex gap-1">
-                      {/* Day labels */}
-                      <div className="flex flex-col gap-1 pr-1">
-                        {DAYS.map((d, i) => (
-                          <div key={d} className={`flex h-3 items-center text-[9px] text-muted-foreground ${i % 2 === 0 ? "opacity-100" : "opacity-0"}`}>
-                            {d}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Week columns */}
-                      {weeks.map((week, wi) => {
-                        const isNewMonth = wi > 0 && monthLabels.some((m) => m.col === wi);
-                        return (
-                        <div key={wi} className={`flex flex-col gap-1${isNewMonth ? " ml-2" : ""}`}>
-                          {week.map((cell, di) => {
-                            const isSelected = selectedCell?.date === cell.date && selectedCell?.level === cell.level;
-                            return (
-                              <button
-                                key={di}
-                                onClick={() => setSelectedCell(isSelected ? null : cell)}
-                                className={`h-3 w-3 rounded-sm transition-all hover:scale-125 cursor-pointer ${heatColors[cell.level]} ${
-                                  isSelected ? "ring-2 ring-primary ring-offset-1 scale-125" : ""
-                                }`}
-                                aria-label={`${cell.fullDate}: ${cell.cards} Karten`}
-                              />
-                            );
-                          })}
-                        </div>
-                      );
-                      })}
-                    </div>
-
-                    {/* Legend */}
-                    <div className="mt-3 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <span>Weniger</span>
-                      {[0,1,2,3,4].map((i) => (
-                        <div key={i} className={`h-3 w-3 rounded-sm ${heatColors[i].split(" ")[0]}`} />
-                      ))}
-                      <span>Mehr</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* ── Fortschritt nach Deck ── */}
-          <Card className="border">
-            <CardContent className="p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="font-semibold">Fortschritt pro Deck</h3>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Trophy className="h-3.5 w-3.5 text-amber-500" />
-                  <span>{totalMastered} / {totalCards} gemeistert</span>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {decks.map((deck) => {
-                  const pct = Math.round((deck.masteredCount / deck.cards.length) * 100);
-                  return (
-                    <div key={deck.id} className="flex items-center gap-3">
-                      <span className="text-lg shrink-0">{deck.emoji}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-sm font-medium truncate">{deck.title}</p>
-                          <p className="text-xs text-muted-foreground shrink-0 ml-2 tabular-nums">
-                            {deck.masteredCount}/{deck.cards.length}
-                          </p>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className={`h-1.5 rounded-full ${deck.color} transition-all duration-700`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-xs font-semibold tabular-nums w-8 text-right text-muted-foreground">
-                        {pct}%
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* ── Weitermachen ── */}
-          <section>
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Weitermachen</h3>
-              <button
-                onClick={() => setActiveTab("decks")}
-                className="text-sm text-primary hover:underline"
-              >
-                Alle Decks →
-              </button>
+        {/* ── Hero ──────────────────────────────────────────────────────── */}
+        <section className="flex min-h-[80vh] flex-col justify-center">
+          <div className="mx-auto max-w-2xl text-center">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 backdrop-blur-sm">
+              <Sparkles className="h-3.5 w-3.5 text-violet-300" />
+              <span className="text-xs font-semibold tracking-widest text-violet-300 uppercase">
+                Lernwissenschaft
+              </span>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {recentDecks.slice(0, 3).map((deck) => (
-                <Card key={deck.id} className="group overflow-hidden border hover:shadow-md transition-shadow">
-                  <CardContent className="p-0">
-                    <div className={`${deck.color} flex h-2 w-full`} />
-                    <div className="p-4">
-                      <div className="flex items-start gap-3">
-                        <span className="text-2xl">{deck.emoji}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold truncate">{deck.title}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {deck.cards.length} Karten · {deck.lastStudied}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-                          <span>{deck.masteredCount} gemeistert</span>
-                          <span>{Math.round((deck.masteredCount / deck.cards.length) * 100)}%</span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-muted">
-                          <div
-                            className={`h-1.5 rounded-full ${deck.color} transition-all`}
-                            style={{ width: `${(deck.masteredCount / deck.cards.length) * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-4 flex gap-2">
-                        <Button asChild size="sm" className="flex-1">
-                          <Link href={`/study/${deck.id}`}>Lernen</Link>
-                        </Button>
-                        <Button asChild size="sm" variant="outline" className="flex-1">
-                          <Link href={`/quiz/${deck.id}`}>Quiz</Link>
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
 
-      {/* ── Tab: Meine Decks ── */}
-      {activeTab === "decks" && (
-        <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {decks.length} Decks · {decks.reduce((s, d) => s + d.cards.length, 0)} Karten insgesamt
+            <h1 className="text-5xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-6xl">
+              Lern wie das Gehirn
+              <br />
+              <span className="bg-gradient-to-r from-violet-300 to-primary bg-clip-text text-transparent">
+                es wirklich will.
+              </span>
+            </h1>
+
+            <p className="mx-auto mt-6 max-w-md text-base leading-relaxed text-white/60">
+              Die meisten lernen falsch — nicht aus Faulheit, sondern weil niemand es ihnen erklärt hat.
+              Synapze baut die Wissenschaft ein.
             </p>
-            <Button asChild size="sm">
-              <Link href="/create">
-                <Plus className="mr-2 h-4 w-4" />
-                Neues Deck
-              </Link>
-            </Button>
-          </div>
 
-          <div className="flex flex-wrap gap-2">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
-                  selectedCategory === cat
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                }`}
-              >
-                {cat}
-              </button>
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <Button asChild size="lg" className="bg-white text-primary font-semibold hover:bg-white/90 shadow-lg shadow-white/10">
+                <Link href="/create">
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  Deck erstellen
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className="border-white/20 text-white hover:bg-white/10">
+                <Link href="/dashboard">
+                  Dashboard
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Stats ─────────────────────────────────────────────────────── */}
+        <section className="mx-auto max-w-3xl py-20">
+          <div className="grid grid-cols-3 gap-8 text-center">
+            {stats.map((s) => (
+              <div key={s.value}>
+                <p className="text-5xl font-black tracking-tight text-white sm:text-6xl">
+                  {s.value}
+                </p>
+                <p className="mt-2 text-sm font-semibold text-white/80">{s.label}</p>
+                <p className="mt-0.5 text-xs text-white/40">{s.sublabel}</p>
+              </div>
             ))}
+          </div>
+          <p className="mt-8 text-center text-xs text-white/25">
+            Ebbinghaus (1885) · Roediger & Karpicke (2006) · Dunlosky et al. (2013)
+          </p>
+        </section>
+
+        {/* ── Onboarding Re-trigger ─────────────────────────────────────── */}
+        <div className="mx-auto max-w-3xl pb-4 text-center">
+          <button
+            onClick={() => window.dispatchEvent(new Event("synapze:show-onboarding"))}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-5 py-2 text-sm font-medium text-white/60 backdrop-blur-sm transition-all hover:border-white/20 hover:bg-white/10 hover:text-white/90"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-violet-300" />
+            Intro nochmals ansehen — warum anders lernen?
+          </button>
+        </div>
+
+        {/* ── Feature Grid ──────────────────────────────────────────────── */}
+        <section className="mx-auto max-w-3xl py-8">
+          <div className="mb-12 text-center">
+            <h2 className="text-3xl font-extrabold text-white">Was Synapze automatisch macht</h2>
+            <p className="mt-3 text-sm text-white/40">Du denkst an den Stoff. Wir denken ans Lernen.</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredDecks.map((deck) => (
-              <Card key={deck.id} className="group overflow-hidden border hover:shadow-md transition-all">
-                <CardContent className="p-0">
-                  <div className={`${deck.color} h-1.5 w-full`} />
-                  <div className="p-5">
-                    <div className="flex items-start gap-3">
-                      <span className="text-3xl">{deck.emoji}</span>
-                      <div>
-                        <p className="font-semibold leading-tight">{deck.title}</p>
-                        <Badge variant="secondary" className="mt-1 text-xs">
-                          {deck.category}
-                        </Badge>
-                      </div>
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground line-clamp-2">{deck.description}</p>
-                    <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <BookOpen className="h-3.5 w-3.5" />
-                        {deck.cards.length} Karten
-                      </span>
-                      {deck.lastStudied && <span>· Zuletzt: {deck.lastStudied}</span>}
-                    </div>
-                    <div className="mt-3">
-                      <div className="mb-1.5 flex justify-between text-xs text-muted-foreground">
-                        <span>{deck.masteredCount} / {deck.cards.length} gemeistert</span>
-                        <span className="font-medium">
-                          {Math.round((deck.masteredCount / deck.cards.length) * 100)}%
-                        </span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className={`h-2 rounded-full ${deck.color} transition-all duration-500`}
-                          style={{ width: `${(deck.masteredCount / deck.cards.length) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-4 flex gap-2">
-                      <Button asChild className="flex-1" size="sm">
-                        <Link href={`/study/${deck.id}`}>Lernen</Link>
-                      </Button>
-                      <Button asChild variant="outline" className="flex-1" size="sm">
-                        <Link href={`/quiz/${deck.id}`}>Quiz</Link>
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+            {features.map((f) => (
+              <FeatureCard
+                key={f.title}
+                icon={f.icon}
+                bg={f.bg}
+                glow={f.glow}
+                title={f.title}
+                desc={f.desc}
+                tooltip={featureTooltips[f.title] ?? { text: f.desc }}
+              />
             ))}
-
-            <Link href="/create">
-              <Card className="group flex h-full min-h-[200px] items-center justify-center border-2 border-dashed border-muted hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer">
-                <CardContent className="flex flex-col items-center gap-2 p-6 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted group-hover:bg-primary/10 transition-colors">
-                    <Plus className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
-                  </div>
-                  <p className="font-medium text-muted-foreground group-hover:text-primary transition-colors">
-                    Neues Deck erstellen
-                  </p>
-                </CardContent>
-              </Card>
-            </Link>
           </div>
-        </div>
-      )}
+        </section>
+
+        {/* ── How it works ──────────────────────────────────────────────── */}
+        <section className="mx-auto max-w-3xl py-20">
+          <div className="mb-12 text-center">
+            <h2 className="text-3xl font-extrabold text-white">So funktioniert Synapze</h2>
+            <p className="mt-3 text-sm text-white/40">Drei Schritte. Das war's.</p>
+          </div>
+
+          <div className="relative grid gap-6 sm:grid-cols-3">
+            {/* Connector line (desktop) */}
+            <div className="absolute top-[26px] left-[calc(16.67%+24px)] right-[calc(16.67%+24px)] hidden h-px bg-gradient-to-r from-violet-500/40 via-primary/40 to-emerald-500/40 sm:block" />
+
+            {steps.map((s) => {
+              const Icon = s.icon;
+              return (
+                <div key={s.step} className="flex flex-col items-center text-center">
+                  <div className={`relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl ${s.bg} shadow-xl ${s.glow}`}>
+                    <Icon className="h-7 w-7 text-white" strokeWidth={1.5} />
+                  </div>
+                  <span className="mt-4 text-xs font-bold tracking-widest text-white/30">{s.step}</span>
+                  <p className="mt-1 font-bold text-white">{s.title}</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-white/50">{s.desc}</p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* ── Ebbinghaus Curve ──────────────────────────────────────────── */}
+        <section className="mx-auto max-w-3xl py-8">
+          <div className="mb-8 text-center">
+            <h2 className="text-3xl font-extrabold text-white">Das Gehirn vergisst. Synapze nicht.</h2>
+            <p className="mt-3 text-sm text-white/40">Ebbinghaus, 1885 — die Wissenschaft hinter Synapze.</p>
+          </div>
+
+          {/* Callout boxes */}
+          <div className="mb-6 grid grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-center">
+              <p className="text-3xl font-black text-rose-400">~21%</p>
+              <p className="mt-1 text-xs font-semibold text-white/60">ohne Wiederholung</p>
+              <p className="text-xs text-white/30">nach 30 Tagen</p>
+            </div>
+            <div className="rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4 text-center">
+              <p className="text-3xl font-black text-violet-400">~85%</p>
+              <p className="mt-1 text-xs font-semibold text-white/60">mit Synapze</p>
+              <p className="text-xs text-white/30">nach 30 Tagen</p>
+            </div>
+          </div>
+
+          {/* Chart */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 pb-2 pt-5 backdrop-blur-sm">
+            <EbbinghausCurve />
+
+            {/* Legend */}
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-5 pb-2 text-xs text-white/50">
+              <div className="flex items-center gap-2">
+                <div className="h-0.5 w-6 rounded-full bg-rose-500" />
+                <span>Ohne Wiederholung</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-0.5 w-6 rounded-full bg-violet-500" />
+                <span>Mit Synapze</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex h-3 w-3 items-center justify-center rounded-full bg-violet-500">
+                  <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                </div>
+                <span>Wiederholung</span>
+              </div>
+            </div>
+          </div>
+          <p className="mt-4 text-center text-xs text-white/25">Ebbinghaus (1885) · Roediger & Karpicke (2006)</p>
+        </section>
+
+        {/* ── CTA ───────────────────────────────────────────────────────── */}
+        <section className="mx-auto max-w-lg py-20 text-center">
+          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-3xl bg-primary shadow-2xl shadow-primary/40">
+            <Zap className="h-8 w-8 text-white" fill="currentColor" />
+          </div>
+          <h2 className="text-3xl font-extrabold text-white">Bereit loszulegen?</h2>
+          <p className="mt-3 text-sm text-white/50">Alle Prinzipien sind eingebaut. Du lernst einfach.</p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Button asChild size="lg" className="bg-white text-primary font-semibold hover:bg-white/90 shadow-xl shadow-white/10">
+              <Link href="/create">
+                Erstes Deck erstellen
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
+        </section>
+
+      </div>
     </div>
   );
 }

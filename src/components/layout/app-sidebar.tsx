@@ -4,13 +4,10 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
   PlusCircle,
-  TrendingUp,
   Compass,
   Settings,
   LogOut,
-  Zap,
   HelpCircle,
   UserCircle,
   Sun,
@@ -19,15 +16,14 @@ import {
   ChevronUp,
   BookOpen,
   Users,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/", label: "Entdecken", icon: Compass },
   { href: "/create", label: "Erstellen", icon: PlusCircle },
-  { href: "/explore", label: "Entdecken", icon: Compass },
   { href: "/community", label: "Community", icon: Users },
-  { href: "/progress", label: "Fortschritt", icon: TrendingUp },
   { href: "/kapiert", label: "Kapiert?", icon: HelpCircle },
 ];
 
@@ -114,15 +110,9 @@ export function AppSidebar() {
 
   return (
     <aside className="flex h-full w-64 flex-col border-r bg-sidebar">
-      {/* Logo */}
-      <Link href="/" className="flex h-16 items-center gap-2.5 border-b px-5 hover:opacity-80 transition-opacity">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-sm">
-          <Zap className="h-4 w-4 text-primary-foreground" fill="currentColor" />
-        </div>
-        <div>
-          <p className="text-base font-bold tracking-tight text-foreground">Synapze</p>
-          <p className="text-[11px] leading-none text-muted-foreground">Smarter lernen</p>
-        </div>
+      {/* Logo — links to dashboard */}
+      <Link href="/dashboard" className="flex h-16 items-center border-b px-5 hover:opacity-80 transition-opacity">
+        <p className="text-lg font-extrabold tracking-tight text-foreground">Synapze</p>
       </Link>
 
       {/* Navigation */}
@@ -145,6 +135,18 @@ export function AppSidebar() {
             </Link>
           );
         })}
+
+        {/* Onboarding re-trigger */}
+        <div className="mt-auto pt-3">
+          <div className="h-px bg-border mb-3" />
+          <button
+            onClick={() => window.dispatchEvent(new Event("synapze:show-onboarding"))}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground/50 transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          >
+            <Sparkles className="h-4 w-4 shrink-0 text-violet-400" />
+            Warum anders lernen?
+          </button>
+        </div>
       </nav>
 
       {/* Bottom */}
