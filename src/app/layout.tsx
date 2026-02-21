@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Header } from "@/components/layout/header";
+import { OnboardingOverlay } from "@/components/OnboardingOverlay";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,6 +30,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <OnboardingOverlay />
         <div className="flex h-screen overflow-hidden">
           {/* Sidebar – nur auf Desktop sichtbar */}
           <div className="hidden md:flex">

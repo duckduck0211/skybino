@@ -1,7 +1,24 @@
+export type CardType = "basic" | "cloze" | "image-occlusion";
+
+export interface OcclusionArea {
+  id: string;
+  x: number; // percentage
+  y: number;
+  w: number;
+  h: number;
+  label?: string;
+}
+
 export interface Card {
   id: string;
+  type?: CardType; // defaults to "basic" if undefined
+  // Basic
   front: string;
   back: string;
+  // Cloze: text with {{c1::word}} syntax stored in `front`, back is unused
+  // Image Occlusion
+  imageUrl?: string;
+  occlusionAreas?: OcclusionArea[];
 }
 
 export interface Deck {
