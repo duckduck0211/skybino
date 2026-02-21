@@ -5,8 +5,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 const activities = [
   {
     id: 1,
-    patient: "Anna Schmidt",
-    initials: "AS",
+    patient: "Lisa Bubulash",
+    initials: "LB",
     action: "Neue Untersuchung",
     time: "Vor 10 Min.",
     status: "Abgeschlossen",

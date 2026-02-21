@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 const upcomingAppointments = [
-  { time: "09:00", patient: "Anna Schmidt", type: "Allgemein", status: "Bestätigt" },
+  { time: "09:00", patient: "Lisa Bubulash", type: "Allgemein", status: "Bestätigt" },
   { time: "10:30", patient: "Klaus Müller", type: "Nachsorge", status: "Bestätigt" },
   { time: "11:00", patient: "Maria Weber", type: "Erstuntersuchung", status: "Ausstehend" },
   { time: "14:00", patient: "Thomas Bauer", type: "Blutabnahme", status: "Bestätigt" },
