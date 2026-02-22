@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { SearchModal } from "@/components/search-modal";
+import { Pomodoro } from "@/components/Pomodoro";
 import {
   Compass,
   PlusCircle,
@@ -18,6 +19,7 @@ import {
   UserCircle,
   LogOut,
   BookOpen,
+  Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +28,7 @@ const navItems = [
   { href: "/",          icon: Compass,   label: "Entdecken"  },
   { href: "/create",    icon: PlusCircle,label: "Erstellen"  },
   { href: "/browse",    icon: Table2,    label: "Browser"    },
+  { href: "/notes",     icon: BookOpen,  label: "Notizen"    },
   { href: "/community", icon: Users,     label: "Community"  },
   { href: "/kapiert",   icon: HelpCircle,label: "Kapiert?"   },
 ];
@@ -63,6 +66,7 @@ const schuljahreMap: Record<string, string> = {
 export function Header() {
   const pathname = usePathname();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [pomodoroOpen, setPomodoroOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("system");
   const [profileName, setProfileName] = useState("Mert Basol");
@@ -107,6 +111,7 @@ export function Header() {
   return (
     <>
     <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+    <Pomodoro isOpen={pomodoroOpen} onClose={() => setPomodoroOpen(false)} />
     <header className="flex h-14 items-center gap-3 border-b bg-background/95 px-5 backdrop-blur-sm">
 
       {/* Logo — links to dashboard */}
@@ -143,6 +148,15 @@ export function Header() {
       </nav>
 
       <div className="flex-1" />
+
+      {/* ── Pomodoro ── */}
+      <button
+        title="Pomodoro-Timer"
+        onClick={() => setPomodoroOpen(true)}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+      >
+        <Timer className="h-[18px] w-[18px]" strokeWidth={1.75} />
+      </button>
 
       {/* ── Search ── */}
       <button

@@ -1,23 +1,24 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import {
   Search, X, ChevronUp, ChevronDown, Flag, BookOpen,
-  EyeOff, Eye, Trash2, ArrowUpRight,
+  EyeOff, Eye, Trash2, ArrowUpRight, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { decks, getAllCards, TODAY } from "@/lib/data";
+import { decks, type Deck, TODAY } from "@/lib/data";
 import type { CardStatus, CardFlag } from "@/lib/data";
+import { getAllDecks, getAllCardsFromStore } from "@/lib/store";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const STATUS_CFG = {
-  new:       { label: "Neu",        badge: "bg-blue-500/15 text-blue-400",     dot: "bg-blue-400",    row: "" },
-  learning:  { label: "Lernend",    badge: "bg-amber-500/15 text-amber-400",   dot: "bg-amber-400",   row: "bg-amber-500/[0.03]" },
-  review:    { label: "Wiederholen",badge: "bg-violet-500/15 text-violet-400", dot: "bg-violet-400",  row: "" },
-  suspended: { label: "Ausgesetzt", badge: "bg-yellow-500/15 text-yellow-500", dot: "bg-yellow-400",  row: "bg-yellow-500/[0.04]" },
-  mastered:  { label: "Gemeistert",badge: "bg-emerald-500/15 text-emerald-400",dot: "bg-emerald-400", row: "" },
+  new:       { label: "Neu",         badge: "bg-blue-500/15 text-blue-400",      dot: "bg-blue-400",    row: "" },
+  learning:  { label: "Lernend",     badge: "bg-amber-500/15 text-amber-400",    dot: "bg-amber-400",   row: "bg-amber-500/[0.03]" },
+  review:    { label: "Wiederholen", badge: "bg-violet-500/15 text-violet-400",  dot: "bg-violet-400",  row: "" },
+  suspended: { label: "Ausgesetzt",  badge: "bg-yellow-500/15 text-yellow-500",  dot: "bg-yellow-400",  row: "bg-yellow-500/[0.04]" },
+  mastered:  { label: "Gemeistert", badge: "bg-emerald-500/15 text-emerald-400", dot: "bg-emerald-400", row: "" },
 } as const;
 
 const FLAG_DOT: Record<CardFlag, string> = {
@@ -28,6 +29,7 @@ const FLAG_LABEL: Record<CardFlag, string> = {
 };
 
 type SortCol = "front" | "deck" | "status" | "due" | "ease" | "interval" | "lapses";
+type SuspendOverride = { status: CardStatus; prevStatus?: CardStatus };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,32 +45,67 @@ function formatDue(dueDate: string | undefined): { text: string; cls: string } {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function BrowsePage() {
-  const [query, setQuery]             = useState("");
-  const [statusFilter, setStatus]     = useState<CardStatus | "all">("all");
-  const [deckFilter, setDeck]         = useState("all");
-  const [flagFilter, setFlag]         = useState<CardFlag | "all">("all");
-  const [sortCol, setSortCol]         = useState<SortCol>("status");
-  const [sortDir, setSortDir]         = useState<"asc" | "desc">("asc");
-  const [selected, setSelected]       = useState<Set<string>>(new Set());
-  const [previewUid, setPreviewUid]   = useState<string | null>(null);
+  const [query, setQuery]               = useState("");
+  const [statusFilter, setStatus]       = useState<CardStatus | "all">("all");
+  const [deckFilter, setDeck]           = useState("all");
+  const [flagFilter, setFlag]           = useState<CardFlag | "all">("all");
+  const [sortCol, setSortCol]           = useState<SortCol>("status");
+  const [sortDir, setSortDir]           = useState<"asc" | "desc">("asc");
+  const [selected, setSelected]         = useState<Set<string>>(new Set());
+  const [previewUid, setPreviewUid]     = useState<string | null>(null);
+  const [allDecksList, setAllDecksList] = useState<Deck[]>(decks);
+  const [overrides, setOverrides]       = useState<Map<string, SuspendOverride>>(new Map());
+  const [suspendToast, setSuspendToast] = useState<string | null>(null);
+  const [tooltipUid, setTooltipUid]     = useState<string | null>(null);
+  const [tooltipY, setTooltipY]         = useState(0);
 
-  // ── All cards flat ──
-  const allCards = useMemo(() => getAllCards(), []);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Load from localStorage ──
+  useEffect(() => {
+    setAllDecksList(getAllDecks());
+    try {
+      const raw = localStorage.getItem("synapze-suspend-overrides");
+      if (raw) {
+        const obj = JSON.parse(raw) as Record<string, SuspendOverride>;
+        setOverrides(new Map(Object.entries(obj)));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Persist overrides ──
+  useEffect(() => {
+    const obj = Object.fromEntries(overrides.entries());
+    localStorage.setItem("synapze-suspend-overrides", JSON.stringify(obj));
+  }, [overrides]);
+
+  // ── Raw cards ──
+  const allCards = useMemo(() => getAllCardsFromStore(), [allDecksList]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Cards with suspend overrides applied ──
+  const allCardsEff = useMemo(() => {
+    if (overrides.size === 0) return allCards;
+    return allCards.map(card => {
+      const ov = overrides.get(card.uid);
+      return ov ? { ...card, status: ov.status } : card;
+    });
+  }, [allCards, overrides]);
 
   // ── Stats ──
   const stats = useMemo(() => ({
-    total:     allCards.length,
-    new:       allCards.filter(c => c.status === "new").length,
-    learning:  allCards.filter(c => c.status === "learning").length,
-    review:    allCards.filter(c => c.status === "review").length,
-    suspended: allCards.filter(c => c.status === "suspended").length,
-    mastered:  allCards.filter(c => c.status === "mastered").length,
-    due:       allCards.filter(c => c.dueDate && c.dueDate <= TODAY).length,
-  }), [allCards]);
+    total:     allCardsEff.length,
+    new:       allCardsEff.filter(c => c.status === "new").length,
+    learning:  allCardsEff.filter(c => c.status === "learning").length,
+    review:    allCardsEff.filter(c => c.status === "review").length,
+    suspended: allCardsEff.filter(c => c.status === "suspended").length,
+    mastered:  allCardsEff.filter(c => c.status === "mastered").length,
+    due:       allCardsEff.filter(c => c.dueDate && c.dueDate <= TODAY).length,
+  }), [allCardsEff]);
 
   // ── Filter ──
   const filtered = useMemo(() => {
-    let r = allCards;
+    let r = allCardsEff;
     if (statusFilter !== "all") r = r.filter(c => c.status === statusFilter);
     if (deckFilter   !== "all") r = r.filter(c => c.deckId === deckFilter);
     if (flagFilter   !== "all") r = r.filter(c => c.flag === flagFilter);
@@ -77,7 +114,7 @@ export default function BrowsePage() {
       r = r.filter(c => c.front.toLowerCase().includes(q) || c.back.toLowerCase().includes(q));
     }
     return r;
-  }, [allCards, statusFilter, deckFilter, flagFilter, query]);
+  }, [allCardsEff, statusFilter, deckFilter, flagFilter, query]);
 
   // ── Sort ──
   const sorted = useMemo(() => {
@@ -86,20 +123,20 @@ export default function BrowsePage() {
       let va: string | number = 0;
       let vb: string | number = 0;
       switch (sortCol) {
-        case "front":    va = a.front;               vb = b.front;               break;
-        case "deck":     va = a.deckTitle;            vb = b.deckTitle;           break;
+        case "front":    va = a.front;              vb = b.front;              break;
+        case "deck":     va = a.deckTitle;           vb = b.deckTitle;          break;
         case "status":   va = statusOrder[a.status]; vb = statusOrder[b.status]; break;
-        case "due":      va = a.dueDate ?? "9999";   vb = b.dueDate ?? "9999";   break;
-        case "ease":     va = a.ease ?? 0;            vb = b.ease ?? 0;           break;
-        case "interval": va = a.interval ?? 0;        vb = b.interval ?? 0;       break;
-        case "lapses":   va = a.lapses ?? 0;          vb = b.lapses ?? 0;         break;
+        case "due":      va = a.dueDate ?? "9999";  vb = b.dueDate ?? "9999";  break;
+        case "ease":     va = a.ease ?? 0;           vb = b.ease ?? 0;          break;
+        case "interval": va = a.interval ?? 0;       vb = b.interval ?? 0;      break;
+        case "lapses":   va = a.lapses ?? 0;         vb = b.lapses ?? 0;        break;
       }
       const cmp = typeof va === "string" ? va.localeCompare(vb as string) : (va - (vb as number));
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [filtered, sortCol, sortDir]);
 
-  const previewCard = previewUid ? allCards.find(c => c.uid === previewUid) ?? null : null;
+  const previewCard = previewUid ? allCardsEff.find(c => c.uid === previewUid) ?? null : null;
 
   // ── Selection ──
   const toggleSelect = (uid: string, e: React.MouseEvent) => {
@@ -115,9 +152,59 @@ export default function BrowsePage() {
     else { setSortCol(col); setSortDir("asc"); }
   };
 
+  // ── Suspend toggle (Anki-Logik) ─────────────────────────────────────────────
+  // Alle ausgesetzt → alle reaktivieren; sonst → nicht-ausgesetzte aussetzen
+  const toggleSuspend = useCallback((uids: Set<string>) => {
+    const uidArray = [...uids];
+    const allCurrentlySuspended = uidArray.every(uid =>
+      allCardsEff.find(c => c.uid === uid)?.status === "suspended"
+    );
+
+    setOverrides(prev => {
+      const next = new Map(prev);
+      for (const uid of uidArray) {
+        const effCard = allCardsEff.find(c => c.uid === uid);
+        if (!effCard) continue;
+        if (allCurrentlySuspended) {
+          // Reaktivieren: vorherigen Status wiederherstellen
+          const existing = next.get(uid);
+          const restoreTo: CardStatus = existing?.prevStatus ?? "new";
+          next.set(uid, { status: restoreTo });
+        } else if (effCard.status !== "suspended") {
+          // Aussetzen
+          next.set(uid, { status: "suspended", prevStatus: effCard.status });
+        }
+      }
+      return next;
+    });
+
+    // Toast
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    const n = uidArray.length;
+    const action = allCurrentlySuspended ? "reaktiviert" : "ausgesetzt";
+    setSuspendToast(`${n} Karte${n !== 1 ? "n" : ""} ${action}`);
+    toastTimer.current = setTimeout(() => setSuspendToast(null), 2500);
+  }, [allCardsEff]);
+
+  // ── ⌘J / Ctrl+J Shortcut ──
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "j") {
+        e.preventDefault();
+        const targets =
+          selected.size > 0 ? selected :
+          previewUid        ? new Set([previewUid]) :
+          new Set<string>();
+        if (targets.size > 0) toggleSuspend(targets);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selected, previewUid, toggleSuspend]);
+
   // ── Status filter pills ──
   const statusPills: { key: CardStatus | "all"; label: string; count: number }[] = [
-    { key: "all",       label: "Alle",        count: allCards.length },
+    { key: "all",       label: "Alle",        count: allCardsEff.length },
     { key: "new",       label: "Neu",         count: stats.new },
     { key: "learning",  label: "Lernend",     count: stats.learning },
     { key: "review",    label: "Wiederholen", count: stats.review },
@@ -125,11 +212,10 @@ export default function BrowsePage() {
     { key: "mastered",  label: "Gemeistert",  count: stats.mastered },
   ];
 
-  // ── Sort icon ──
   const SortIcon = ({ col }: { col: SortCol }) =>
-    sortCol === col ? (
-      sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-    ) : null;
+    sortCol === col
+      ? sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+      : null;
 
   const Th = ({ col, label }: { col: SortCol; label: string }) => (
     <th
@@ -143,12 +229,21 @@ export default function BrowsePage() {
   return (
     <div className="space-y-4">
 
+      {/* ── Suspend Toast ── */}
+      {suspendToast && (
+        <div className="fixed right-6 top-20 z-50 flex items-center gap-2 rounded-xl border bg-popover px-4 py-2.5 text-sm font-medium shadow-xl">
+          <EyeOff className="h-4 w-4 text-yellow-500" />
+          {suspendToast}
+          <kbd className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">⌘J</kbd>
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center gap-4">
         <div>
           <h1 className="text-xl font-bold">Karten-Browser</h1>
           <p className="text-sm text-muted-foreground">
-            {allCards.length} Karten in {decks.length} Decks
+            {allCardsEff.length} Karten in {allDecksList.length} Decks
           </p>
         </div>
 
@@ -175,7 +270,7 @@ export default function BrowsePage() {
           className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
         >
           <option value="all">Alle Decks</option>
-          {decks.map(d => <option key={d.id} value={d.id}>{d.emoji} {d.title}</option>)}
+          {allDecksList.map(d => <option key={d.id} value={d.id}>{d.emoji} {d.title}</option>)}
         </select>
 
         {/* Flag filter */}
@@ -188,17 +283,24 @@ export default function BrowsePage() {
           {([1, 2, 3, 4] as CardFlag[]).map(f => <option key={f} value={f}>{FLAG_LABEL[f]}</option>)}
           <option value={0}>Kein Flag</option>
         </select>
+
+        {/* ⌘J hint */}
+        <div className="ml-auto flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-1.5 text-xs text-muted-foreground">
+          <EyeOff className="h-3.5 w-3.5" />
+          Aussetzen / Reaktivieren:
+          <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">⌘J</kbd>
+        </div>
       </div>
 
       {/* ── Stats strip ── */}
       <div className="flex flex-wrap gap-2">
         {[
-          { label: "Fällig heute", value: stats.due,       color: "text-orange-500" },
-          { label: "Neu",          value: stats.new,        color: "text-blue-400"   },
-          { label: "Lernend",      value: stats.learning,   color: "text-amber-400"  },
-          { label: "Wiederholen",  value: stats.review,     color: "text-violet-400" },
-          { label: "Ausgesetzt",   value: stats.suspended,  color: "text-yellow-500" },
-          { label: "Gemeistert",   value: stats.mastered,   color: "text-emerald-400"},
+          { label: "Fällig heute", value: stats.due,       color: "text-orange-500"  },
+          { label: "Neu",          value: stats.new,        color: "text-blue-400"    },
+          { label: "Lernend",      value: stats.learning,   color: "text-amber-400"   },
+          { label: "Wiederholen",  value: stats.review,     color: "text-violet-400"  },
+          { label: "Ausgesetzt",   value: stats.suspended,  color: "text-yellow-500"  },
+          { label: "Gemeistert",   value: stats.mastered,   color: "text-emerald-400" },
         ].map(s => (
           <div key={s.label} className="flex items-center gap-2 rounded-xl border bg-card px-4 py-2">
             <span className={cn("text-lg font-bold tabular-nums", s.color)}>{s.value}</span>
@@ -257,15 +359,25 @@ export default function BrowsePage() {
 
             <tbody>
               {sorted.map(card => {
-                const isSelected = selected.has(card.uid);
+                const isSelected  = selected.has(card.uid);
                 const isPreviewed = previewUid === card.uid;
-                const sc = STATUS_CFG[card.status];
+                const sc  = STATUS_CFG[card.status];
                 const due = formatDue(card.dueDate);
 
                 return (
                   <tr
                     key={card.uid}
                     onClick={() => setPreviewUid(isPreviewed ? null : card.uid)}
+                    onMouseEnter={(e) => {
+                      if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setTooltipY(rect.top + rect.height / 2);
+                      tooltipTimer.current = setTimeout(() => setTooltipUid(card.uid), 450);
+                    }}
+                    onMouseLeave={() => {
+                      if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+                      setTooltipUid(null);
+                    }}
                     className={cn(
                       "cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40",
                       sc.row,
@@ -273,47 +385,29 @@ export default function BrowsePage() {
                       isSelected && !isPreviewed && "bg-primary/[0.03]"
                     )}
                   >
-                    {/* Checkbox */}
                     <td className="px-3 py-2.5" onClick={e => toggleSelect(card.uid, e)}>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => {}}
-                        className="pointer-events-none rounded"
-                      />
+                      <input type="checkbox" checked={isSelected} onChange={() => {}} className="pointer-events-none rounded" />
                     </td>
-
-                    {/* Flag dot */}
                     <td className="px-1 py-2.5">
                       {card.flag > 0 && (
                         <div className={cn("h-2 w-2 rounded-full", FLAG_DOT[card.flag])} title={FLAG_LABEL[card.flag]} />
                       )}
                     </td>
-
-                    {/* Front */}
                     <td className="max-w-[260px] px-3 py-2.5">
                       <p className="truncate text-sm">{card.front}</p>
                     </td>
-
-                    {/* Deck */}
                     <td className="px-3 py-2.5">
                       <span className="flex max-w-[120px] items-center gap-1.5 text-sm text-muted-foreground">
                         <span>{card.deckEmoji}</span>
                         <span className="truncate">{card.deckTitle}</span>
                       </span>
                     </td>
-
-                    {/* Status badge */}
                     <td className="px-3 py-2.5">
                       <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-semibold", sc.badge)}>
                         {sc.label}
                       </span>
                     </td>
-
-                    {/* Due */}
                     <td className={cn("px-3 py-2.5 text-sm tabular-nums", due.cls)}>{due.text}</td>
-
-                    {/* Ease */}
                     <td className="px-3 py-2.5 text-sm tabular-nums text-muted-foreground">
                       {card.ease !== undefined ? (
                         <span className={cn(
@@ -322,13 +416,9 @@ export default function BrowsePage() {
                         )}>{card.ease.toFixed(1)}</span>
                       ) : "–"}
                     </td>
-
-                    {/* Interval */}
                     <td className="px-3 py-2.5 text-sm tabular-nums text-muted-foreground">
                       {card.interval !== undefined ? `${card.interval}d` : "–"}
                     </td>
-
-                    {/* Lapses */}
                     <td className="px-3 py-2.5 text-sm tabular-nums">
                       {card.lapses !== undefined ? (
                         <span className={cn(
@@ -352,9 +442,8 @@ export default function BrowsePage() {
           </table>
         </div>
 
-        {/* Table footer */}
         <div className="border-t bg-muted/20 px-4 py-2 text-xs text-muted-foreground">
-          {sorted.length} von {allCards.length} Karten
+          {sorted.length} von {allCardsEff.length} Karten
           {selected.size > 0 && (
             <span className="ml-3 font-semibold text-primary">{selected.size} ausgewählt</span>
           )}
@@ -364,14 +453,10 @@ export default function BrowsePage() {
       {/* ── Preview panel ── */}
       {previewCard && (
         <div className="rounded-xl border bg-card p-5">
-          {/* Deck + status */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <span className="text-xl">{previewCard.deckEmoji}</span>
             <span className="text-sm font-medium text-muted-foreground">{previewCard.deckTitle}</span>
-            <span className={cn(
-              "rounded-full px-2.5 py-0.5 text-[11px] font-semibold",
-              STATUS_CFG[previewCard.status].badge
-            )}>
+            <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-semibold", STATUS_CFG[previewCard.status].badge)}>
               {STATUS_CFG[previewCard.status].label}
             </span>
             {previewCard.flag > 0 && (
@@ -388,35 +473,25 @@ export default function BrowsePage() {
             </button>
           </div>
 
-          {/* Card content */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Vorderseite
-              </p>
-              <div className="min-h-[60px] rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed">
-                {previewCard.front}
-              </div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Vorderseite</p>
+              <div className="min-h-[60px] rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed">{previewCard.front}</div>
             </div>
             <div>
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Rückseite
-              </p>
-              <div className="min-h-[60px] rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed">
-                {previewCard.back}
-              </div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Rückseite</p>
+              <div className="min-h-[60px] rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed">{previewCard.back}</div>
             </div>
           </div>
 
-          {/* SRS data */}
           {previewCard.status !== "new" && (
             <div className="mt-4 flex flex-wrap gap-6 border-t pt-4">
               {[
-                { label: "Ease",          value: previewCard.ease?.toFixed(2) ?? "–",                                          highlight: previewCard.ease !== undefined && previewCard.ease < 2.0 ? "text-red-500" : undefined },
-                { label: "Intervall",     value: previewCard.interval !== undefined ? `${previewCard.interval} Tage` : "–" },
-                { label: "Fehler",        value: previewCard.lapses?.toString() ?? "–",                                         highlight: (previewCard.lapses ?? 0) >= 3 ? "text-red-500" : undefined },
-                { label: "Wiederholungen",value: previewCard.reps?.toString() ?? "–" },
-                { label: "Fällig",        value: formatDue(previewCard.dueDate).text,                                           highlight: formatDue(previewCard.dueDate).cls },
+                { label: "Ease",           value: previewCard.ease?.toFixed(2) ?? "–",                               highlight: previewCard.ease !== undefined && previewCard.ease < 2.0 ? "text-red-500" : undefined },
+                { label: "Intervall",      value: previewCard.interval !== undefined ? `${previewCard.interval} Tage` : "–" },
+                { label: "Fehler",         value: previewCard.lapses?.toString() ?? "–",                              highlight: (previewCard.lapses ?? 0) >= 3 ? "text-red-500" : undefined },
+                { label: "Wiederholungen", value: previewCard.reps?.toString() ?? "–" },
+                { label: "Fällig",         value: formatDue(previewCard.dueDate).text,                                highlight: formatDue(previewCard.dueDate).cls },
               ].map(s => (
                 <div key={s.label}>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{s.label}</p>
@@ -426,28 +501,29 @@ export default function BrowsePage() {
             </div>
           )}
 
-          {/* Actions */}
           <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
             <Link
               href={`/study/${previewCard.deckId}`}
               className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              <BookOpen className="h-3.5 w-3.5" />
-              Deck lernen
+              <BookOpen className="h-3.5 w-3.5" />Deck lernen
             </Link>
             <Link
               href={`/study/${previewCard.deckId}`}
               className="flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-medium hover:bg-muted transition-colors"
             >
-              <ArrowUpRight className="h-3.5 w-3.5" />
-              Deck öffnen
+              <ArrowUpRight className="h-3.5 w-3.5" />Deck öffnen
             </Link>
-            <button className="flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-medium hover:bg-muted transition-colors">
+
+            {/* Aussetzen — nur per ⌘J, kein Klick */}
+            <div className="flex items-center gap-1.5 rounded-lg border border-dashed px-3.5 py-1.5 text-sm text-muted-foreground select-none">
               {previewCard.status === "suspended"
-                ? <><Eye className="h-3.5 w-3.5" /> Reaktivieren</>
-                : <><EyeOff className="h-3.5 w-3.5" /> Aussetzen</>
+                ? <><Eye className="h-3.5 w-3.5" />Reaktivieren</>
+                : <><EyeOff className="h-3.5 w-3.5" />Aussetzen</>
               }
-            </button>
+              <kbd className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">⌘J</kbd>
+            </div>
+
             <div className="flex gap-1 ml-0.5">
               {([1, 2, 3, 4] as CardFlag[]).map(f => (
                 <button
@@ -462,22 +538,75 @@ export default function BrowsePage() {
                 </button>
               ))}
             </div>
+
             <button className="ml-auto flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3.5 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors">
-              <Trash2 className="h-3.5 w-3.5" />
-              Löschen
+              <Trash2 className="h-3.5 w-3.5" />Löschen
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Bulk action bar (floating) ── */}
+      {/* ── AI Hover Tooltip ── */}
+      {tooltipUid && (() => {
+        const tc = allCardsEff.find(c => c.uid === tooltipUid);
+        if (!tc) return null;
+        const clampedY = Math.min(Math.max(tooltipY - 90, 72), 9999);
+        return (
+          <div
+            className="pointer-events-none fixed z-50 w-72 overflow-hidden rounded-xl border border-violet-500/30 bg-popover shadow-2xl"
+            style={{ right: 24, top: clampedY }}
+          >
+            <div className="flex items-center gap-2 border-b border-violet-500/20 bg-violet-500/8 px-4 py-2.5">
+              <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+              <span className="text-xs font-semibold text-violet-400">thaura.ai erklärt</span>
+              <span className="ml-auto rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-medium text-violet-400">Bald verfügbar</span>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Begriff</p>
+                <p className="text-sm font-medium text-foreground leading-snug">{tc.front}</p>
+              </div>
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Erklärung</p>
+                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">{tc.back}</p>
+              </div>
+              <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-3 py-2.5">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-violet-400/60" />
+                  <p className="text-[11px] text-violet-400/70 leading-relaxed italic">
+                    thaura.ai wird diesen Begriff bald kontextbezogen erklären, Eselsbrücken vorschlagen und verwandte Konzepte verknüpfen.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                <span className={cn("rounded-full px-2 py-0.5 font-semibold", STATUS_CFG[tc.status].badge)}>
+                  {STATUS_CFG[tc.status].label}
+                </span>
+                <span>{tc.deckEmoji} {tc.deckTitle}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Bulk action bar ── */}
       {selected.size > 0 && (
         <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border bg-popover px-5 py-3 shadow-2xl">
           <span className="text-sm font-semibold">{selected.size} Karten</span>
           <div className="h-4 w-px bg-border" />
-          <button className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <EyeOff className="h-3.5 w-3.5" />Aussetzen
-          </button>
+
+          {/* Suspend: nur ⌘J, kein Klick */}
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            {(() => {
+              const selArr = [...selected];
+              const allSusp = selArr.every(uid => allCardsEff.find(c => c.uid === uid)?.status === "suspended");
+              return allSusp
+                ? <><Eye className="h-3.5 w-3.5" />Reaktivieren</>
+                : <><EyeOff className="h-3.5 w-3.5" />Aussetzen</>;
+            })()}
+            <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">⌘J</kbd>
+          </div>
+
           <button className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <Flag className="h-3.5 w-3.5" />Flag
           </button>

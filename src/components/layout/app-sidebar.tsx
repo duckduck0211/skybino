@@ -17,6 +17,7 @@ import {
   BookOpen,
   Users,
   Sparkles,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,7 @@ const navItems = [
   { href: "/create", label: "Erstellen", icon: PlusCircle },
   { href: "/community", label: "Community", icon: Users },
   { href: "/kapiert", label: "Kapiert?", icon: HelpCircle },
+  { href: "/philosophie", label: "Philosophie", icon: Shield },
 ];
 
 type Theme = "light" | "dark" | "system";

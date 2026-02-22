@@ -1,11 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, RotateCcw, X, CheckCircle2, XCircle, Lightbulb } from "lucide-react";
+import { ArrowLeft, RotateCcw, X, CheckCircle2, XCircle, Lightbulb, Clock, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getDeckById } from "@/lib/data";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function daysFromNow(iso: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const [y, m, d] = iso.split("-").map(Number);
+  return Math.ceil((new Date(y, m - 1, d).getTime() - today.getTime()) / 86400000);
+}
+
+interface CalendarEvent { id: string; date: string; title: string; type: string; }
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function StudyPage() {
   const params = useParams();
@@ -18,6 +30,51 @@ export default function StudyPage() {
   const [known, setKnown] = useState<string[]>([]);
   const [learning, setLearning] = useState<string[]>([]);
   const [isDone, setIsDone] = useState(false);
+
+  // 20-second auto-reveal
+  const [autoRevealSecs, setAutoRevealSecs] = useState(20);
+  const [autoRevealActive, setAutoRevealActive] = useState(true);
+  const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Parkinson: nearest upcoming exam for this deck
+  const [upcomingExam, setUpcomingExam] = useState<CalendarEvent | null>(null);
+
+  // Load calendar events and find relevant exam
+  useEffect(() => {
+    const raw = localStorage.getItem("synapze-calendar-events");
+    if (!raw || !deck) return;
+    const events: CalendarEvent[] = JSON.parse(raw);
+    const deckKeywords = deck.title.toLowerCase().split(" ");
+    const relevant = events
+      .filter(e => {
+        const diff = daysFromNow(e.date);
+        if (diff < 0) return false;
+        const titleLower = e.title.toLowerCase();
+        return deckKeywords.some(kw => kw.length > 2 && titleLower.includes(kw));
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+    setUpcomingExam(relevant[0] ?? null);
+  }, [deck]);
+
+  // 20-second countdown resets on card change
+  useEffect(() => {
+    if (!autoRevealActive || isFlipped) {
+      if (revealTimerRef.current) clearInterval(revealTimerRef.current);
+      return;
+    }
+    setAutoRevealSecs(20);
+    revealTimerRef.current = setInterval(() => {
+      setAutoRevealSecs(prev => {
+        if (prev <= 1) {
+          clearInterval(revealTimerRef.current!);
+          setIsFlipped(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => { if (revealTimerRef.current) clearInterval(revealTimerRef.current); };
+  }, [currentIndex, autoRevealActive, isFlipped]);
 
   if (!deck) {
     return (
@@ -112,6 +169,28 @@ export default function StudyPage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
+
+      {/* ── Parkinson's Law Banner ── */}
+      {upcomingExam && (() => {
+        const diff = daysFromNow(upcomingExam.date);
+        const urgency = diff <= 3 ? "bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400"
+                      : diff <= 7 ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                      : "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400";
+        return (
+          <div className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${urgency}`}>
+            <CalendarDays className="h-4 w-4 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate">{upcomingExam.title}</p>
+              <p className="text-xs opacity-80">Parkinson-Gesetz: Nutze den Druck!</p>
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="text-lg font-black tabular-nums leading-none">{diff}</p>
+              <p className="text-[10px] opacity-70">Tage</p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Top Bar */}
       <div className="flex items-center gap-4">
         <Button asChild variant="ghost" size="sm">
@@ -125,6 +204,19 @@ export default function StudyPage() {
             {deck.emoji} {deck.title}
           </p>
         </div>
+        {/* 20s Auto-Reveal toggle */}
+        <button
+          onClick={() => setAutoRevealActive(a => !a)}
+          title="20-Sekunden Auto-Aufdecken"
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+            autoRevealActive
+              ? "bg-primary/10 text-primary"
+              : "bg-muted text-muted-foreground"
+          }`}
+        >
+          <Clock className="h-3.5 w-3.5" />
+          {autoRevealActive && !isFlipped ? `${autoRevealSecs}s` : "20s"}
+        </button>
         <p className="text-sm font-semibold tabular-nums">
           {currentIndex + 1} / {cards.length}
         </p>
@@ -137,6 +229,19 @@ export default function StudyPage() {
           style={{ width: `${progress}%` }}
         />
       </div>
+
+      {/* 20s progress ring (visible when active and not flipped) */}
+      {autoRevealActive && !isFlipped && (
+        <div className="flex items-center justify-center gap-2 -mt-3 text-xs text-muted-foreground">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-1.5 rounded-full bg-primary/50 transition-all duration-1000"
+              style={{ width: `${(autoRevealSecs / 20) * 100}%` }}
+            />
+          </div>
+          <span className="tabular-nums text-[11px]">Aufdecken in {autoRevealSecs}s</span>
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="flex justify-center gap-6 text-sm">
