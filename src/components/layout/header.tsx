@@ -20,6 +20,11 @@ import {
   LogOut,
   BookOpen,
   Timer,
+  Camera,
+  Plus,
+  CreditCard,
+  FolderPlus,
+  Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +33,7 @@ const navItems = [
   { href: "/",          icon: Compass,   label: "Entdecken"  },
   { href: "/create",    icon: PlusCircle,label: "Erstellen"  },
   { href: "/browse",    icon: Table2,    label: "Browser"    },
+  { href: "/capture",   icon: Camera,    label: "Erfassen"   },
   { href: "/notes",     icon: BookOpen,  label: "Notizen"    },
   { href: "/community", icon: Users,     label: "Community"  },
   { href: "/kapiert",   icon: HelpCircle,label: "Kapiert?"   },
@@ -72,6 +78,8 @@ export function Header() {
   const [profileName, setProfileName] = useState("Mert Basol");
   const [profileJahr, setProfileJahr] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const plusRef = useRef<HTMLDivElement>(null);
 
   // Cmd+K / Ctrl+K global shortcut
   useEffect(() => {
@@ -104,6 +112,15 @@ export function Header() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
+
+  useEffect(() => {
+    if (!plusOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (plusRef.current && !plusRef.current.contains(e.target as Node)) setPlusOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [plusOpen]);
 
   const initials = profileName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() || "MB";
   const handleTheme = (t: Theme) => { setTheme(t); applyThemeToDOM(t); };
@@ -146,6 +163,55 @@ export function Header() {
           );
         })}
       </nav>
+
+      {/* ── Plus Dropdown ── */}
+      <div className="relative" ref={plusRef}>
+        <button
+          onClick={() => setPlusOpen(!plusOpen)}
+          title="Erstellen"
+          className={cn(
+            "flex h-8 w-8 items-center justify-center rounded-lg transition-all",
+            plusOpen
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <Plus className="h-[18px] w-[18px]" strokeWidth={2} />
+        </button>
+
+        {plusOpen && (
+          <div className="absolute left-0 top-full mt-2 w-64 overflow-hidden rounded-xl border bg-popover shadow-2xl ring-1 ring-black/5 z-50">
+            <div className="p-1.5">
+              {(
+                [
+                  { icon: BookOpen,   label: "Lernset",              description: "Neues Deck erstellen",       href: "/create",    iconBg: "bg-violet-100 dark:bg-violet-900/30",  iconColor: "text-violet-600 dark:text-violet-400" },
+                  { icon: Camera,     label: "Erfassen & Lernen",     description: "Bild mit KI analysieren",    href: "/scan",      iconBg: "bg-amber-100 dark:bg-amber-900/30",    iconColor: "text-amber-600 dark:text-amber-400"  },
+                  { icon: CreditCard, label: "Karteikarten",          description: "Karten direkt erstellen",    href: "/create",    iconBg: "bg-blue-100 dark:bg-blue-900/30",      iconColor: "text-blue-600 dark:text-blue-400"    },
+                  { icon: PlusCircle, label: "Cornell-Notiz",         description: "Notiz nach Cornell-Methode", href: "/notes",     iconBg: "bg-teal-100 dark:bg-teal-900/30",      iconColor: "text-teal-600 dark:text-teal-400"    },
+                  { icon: FolderPlus, label: "Ordner",                description: "Decks organisieren",         href: "#",          iconBg: "bg-emerald-100 dark:bg-emerald-900/30",iconColor: "text-emerald-600 dark:text-emerald-400"},
+                  { icon: Users,      label: "Lerngruppe",            description: "Gemeinsam lernen",           href: "/community", iconBg: "bg-pink-100 dark:bg-pink-900/30",      iconColor: "text-pink-600 dark:text-pink-400"    },
+                  { icon: Wrench,     label: "Arbeitshilfe",          description: "Lernhilfen & Tools",         href: "#",          iconBg: "bg-orange-100 dark:bg-orange-900/30",  iconColor: "text-orange-600 dark:text-orange-400"},
+                ] as const
+              ).map(({ icon: Icon, label, description, href, iconBg, iconColor }) => (
+                <Link
+                  key={label}
+                  href={href}
+                  onClick={() => setPlusOpen(false)}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-accent"
+                >
+                  <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", iconBg)}>
+                    <Icon className={cn("h-4 w-4", iconColor)} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{label}</p>
+                    <p className="text-xs text-muted-foreground">{description}</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="flex-1" />
 

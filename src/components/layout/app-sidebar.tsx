@@ -18,12 +18,16 @@ import {
   Users,
   Sparkles,
   Shield,
+  ScanLine,
+  GraduationCap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Entdecken", icon: Compass },
+  { href: "/lernen", label: "Mathematik", icon: GraduationCap },
   { href: "/create", label: "Erstellen", icon: PlusCircle },
+  { href: "/scan", label: "Scannen", icon: ScanLine },
   { href: "/community", label: "Community", icon: Users },
   { href: "/kapiert", label: "Kapiert?", icon: HelpCircle },
   { href: "/philosophie", label: "Philosophie", icon: Shield },
