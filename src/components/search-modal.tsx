@@ -19,9 +19,7 @@ import {
   Timer,
   Shuffle,
   BookOpen,
-  ArrowRight,
   Sparkles,
-  Command,
   CornerDownLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -320,13 +318,6 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
               </button>
             );
           })}
-          <Link
-            href="/browse"
-            onClick={onClose}
-            className="ml-auto shrink-0 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
-          >
-            Browser öffnen →
-          </Link>
         </div>
 
         {/* Results */}

@@ -106,11 +106,11 @@ function BasicCardRow({ card, onChange, onRemove, index, canRemove }: {
             className="w-full border-0 border-b-2 border-muted bg-transparent pb-1.5 text-sm outline-none transition-colors focus:border-primary"
           />
           <label className="mt-2 block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Begriff
+            Vorderseite
           </label>
         </div>
 
-        {/* DEFINITION */}
+        {/* RÜCKSEITE */}
         <div>
           <input
             value={card.back}
@@ -119,7 +119,7 @@ function BasicCardRow({ card, onChange, onRemove, index, canRemove }: {
             className="w-full border-0 border-b-2 border-muted bg-transparent pb-1.5 text-sm outline-none transition-colors focus:border-primary"
           />
           <label className="mt-2 block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Definition
+            Rückseite
           </label>
         </div>
 
