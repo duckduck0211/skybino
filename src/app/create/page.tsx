@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, useCallback, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Plus,
@@ -30,7 +30,7 @@ import { getAllDecks, createUserDeck, addCardsToDeck } from "@/lib/store";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface BasicCard { id: string; type: "basic"; front: string; back: string }
+interface BasicCard { id: string; type: "basic"; front: string; back: string; image?: string }
 interface ClozeCard  { id: string; type: "cloze";  text: string }
 interface OccCard    { id: string; type: "image-occlusion"; imageUrl: string; areas: OcclusionArea[] }
 type AnyCard = BasicCard | ClozeCard | OccCard;
@@ -78,6 +78,43 @@ const noteTypes: { id: CardType; icon: React.ElementType; label: string; desc: s
 function BasicCardRow({ card, onChange, onRemove, index, canRemove }: {
   card: BasicCard; onChange: (c: BasicCard) => void; onRemove: () => void; index: number; canRemove: boolean;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imgZoneRef = useRef<HTMLDivElement>(null);
+  const [pasteActive, setPasteActive] = useState(false);
+
+  // Read image from clipboard item
+  const readClipboardImage = useCallback((item: DataTransferItem) => {
+    const blob = item.getAsFile();
+    if (!blob) return;
+    const reader = new FileReader();
+    reader.onload = (e) => onChange({ ...card, image: e.target?.result as string });
+    reader.readAsDataURL(blob);
+  }, [card, onChange]);
+
+  // Global paste listener when this card's image zone is active
+  useEffect(() => {
+    if (!pasteActive) return;
+    const handler = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const imgItem = items.find((i) => i.type.startsWith("image/"));
+      if (imgItem) { e.preventDefault(); readClipboardImage(imgItem); setPasteActive(false); }
+    };
+    const blur = () => setPasteActive(false);
+    document.addEventListener("paste", handler);
+    window.addEventListener("blur", blur);
+    return () => { document.removeEventListener("paste", handler); window.removeEventListener("blur", blur); };
+  }, [pasteActive, readClipboardImage]);
+
+  // File input change
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => onChange({ ...card, image: ev.target?.result as string });
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   return (
     <div className="rounded-2xl border bg-card shadow-sm transition-shadow hover:shadow-md">
       {/* Top bar */}
@@ -97,7 +134,7 @@ function BasicCardRow({ card, onChange, onRemove, index, canRemove }: {
 
       {/* Fields */}
       <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-6 px-5 py-5">
-        {/* BEGRIFF */}
+        {/* VORDERSEITE */}
         <div>
           <input
             value={card.front}
@@ -123,11 +160,44 @@ function BasicCardRow({ card, onChange, onRemove, index, canRemove }: {
           </label>
         </div>
 
-        {/* Bild placeholder */}
-        <button className="flex h-[60px] w-[60px] flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-muted text-muted-foreground transition-all hover:border-primary/40 hover:text-primary">
-          <ImageIcon className="h-5 w-5" />
-          <span className="text-[10px] font-medium">Bild</span>
-        </button>
+        {/* Bild */}
+        <div ref={imgZoneRef} className="relative flex h-[60px] w-[60px] shrink-0 items-center justify-center">
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
+
+          {card.image ? (
+            // Thumbnail preview — click to replace, X to remove
+            <div className="relative h-full w-full group cursor-pointer" onClick={() => fileInputRef.current?.click()} title="Klicken zum Ersetzen">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={card.image} alt="Bild" className="h-full w-full rounded-xl object-cover" />
+              {/* Hover overlay */}
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                <ImageIcon className="h-4 w-4 text-white" />
+              </div>
+              {/* Remove button */}
+              <button
+                onClick={(e) => { e.stopPropagation(); onChange({ ...card, image: undefined }); }}
+                className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-white shadow"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </div>
+          ) : (
+            // Empty — click = Datei-Dialog · ⌘V = Zwischenablage
+            <button
+              title="Klicken zum Hochladen · ⌘V zum Einfügen"
+              onClick={() => { setPasteActive(true); fileInputRef.current?.click(); }}
+              className={cn(
+                "flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed transition-all",
+                pasteActive
+                  ? "border-primary text-primary animate-pulse"
+                  : "border-muted text-muted-foreground hover:border-primary/40 hover:text-primary"
+              )}
+            >
+              <ImageIcon className="h-5 w-5" />
+              <span className="text-[10px] font-medium">{pasteActive ? "⌘V" : "Bild"}</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -398,7 +468,16 @@ function SmartAssistPanel({ onClose }: { onClose: () => void }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function CreatePage() {
-  const router = useRouter();
+  return (
+    <Suspense>
+      <CreatePageInner />
+    </Suspense>
+  );
+}
+
+function CreatePageInner() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
 
   // ── Mode ──
   const [mode, setMode] = useState<"new" | "add">("new");
@@ -428,10 +507,18 @@ export default function CreatePage() {
   const [savedDeckId, setSavedDeckId] = useState<string | null>(null);
 
   useEffect(() => {
-    const loaded = getAllDecks();
+    const loaded     = getAllDecks();
+    const deckIdParam = searchParams.get("deckId");
+    const modeParam   = searchParams.get("mode");
     setAllDecks(loaded);
-    if (loaded.length > 0) setSelectedDeckId(loaded[0].id);
-  }, []);
+    if (deckIdParam) {
+      setMode("add");
+      setSelectedDeckId(deckIdParam);
+    } else {
+      if (modeParam === "add") setMode("add");
+      if (loaded.length > 0) setSelectedDeckId(loaded[0].id);
+    }
+  }, [searchParams]);
 
   // ── Card helpers ──
   const addCard = () => {

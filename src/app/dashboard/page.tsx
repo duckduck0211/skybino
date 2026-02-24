@@ -10,7 +10,6 @@ import {
   BookOpen,
   Zap,
   ChevronDown,
-  MoreHorizontal,
   Play,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -77,9 +76,13 @@ function DeckCard({ deck }: { deck: Deck }) {
             </p>
           </div>
         </div>
-        <button className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
+        <Link
+          href={`/create?deckId=${deck.id}&mode=add`}
+          title="Karten hinzufügen"
+          className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 group-hover:opacity-100 transition-all hover:bg-primary/10 hover:text-primary"
+        >
+          <Plus className="h-4 w-4" />
+        </Link>
       </div>
 
       {/* Progress bar */}
