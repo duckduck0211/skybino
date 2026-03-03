@@ -5,7 +5,7 @@ import { CheckCircle2, BookOpen, GraduationCap, MapPin, Calendar, Award, Chevron
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getAllDecks, getBackups, deleteBackup, restoreBackup, createBackup } from "@/lib/store";
+import { getAllDecks, getBackups, deleteBackup, restoreBackup, createBackup, setExpertMode } from "@/lib/store";
 import type { Backup } from "@/lib/store";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -67,6 +67,7 @@ interface UserProfile {
   schuljahr: string;
   abschlussJahr: string;
   angestrebterAbschluss: string;
+  expertMode?: boolean;
 }
 
 const defaultProfile: UserProfile = {
@@ -122,6 +123,17 @@ export default function ProfilePage() {
 
   const set = (field: keyof UserProfile, value: string) =>
     setProfile(p => ({ ...p, [field]: value }));
+
+  const gradeMatch = profile.schuljahr.match(/^klasse-(\d+)$/);
+  const grade = gradeMatch ? parseInt(gradeMatch[1]) : 99;
+  const canToggleExpert = grade >= 9;
+  const defaultExpert = grade >= 10;
+  const currentExpertMode = profile.expertMode ?? defaultExpert;
+
+  const handleExpertToggle = (value: boolean) => {
+    setExpertMode(value);
+    setProfile(p => ({ ...p, expertMode: value }));
+  };
 
   const allDecks = getAllDecks();
   const totalCards = allDecks.reduce((s, d) => s + d.cards.length, 0);
@@ -231,6 +243,36 @@ export default function ProfilePage() {
                 {schuljahre.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
             </div>
+
+            {/* Experten-Modus Toggle (ab Klasse 9) */}
+            {canToggleExpert && (
+              <div>
+                <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+                  <Zap className="h-3.5 w-3.5 text-primary" /> Anzeigemodus
+                </label>
+                <div className="flex rounded-lg border overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => handleExpertToggle(false)}
+                    className={`flex-1 py-2 text-sm font-medium transition-all ${!currentExpertMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  >
+                    Einfach
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExpertToggle(true)}
+                    className={`flex-1 py-2 text-sm font-medium transition-all ${currentExpertMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  >
+                    Experten-Modus
+                  </button>
+                </div>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {currentExpertMode
+                    ? "4 Bewertungs-Buttons, KI-Erklärungen, detaillierte Stats"
+                    : "2 Buttons (Wusste ich / Nochmal), übersichtliches Design"}
+                </p>
+              </div>
+            )}
 
             {/* Angestrebter Abschluss */}
             <div>

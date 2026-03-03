@@ -5,10 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, RotateCcw, Lightbulb, Clock,
-  CalendarDays, Sparkles, MessageSquare, Send, ChevronDown, ChevronUp, BookOpen,
+  CalendarDays, Sparkles, MessageSquare, Send, ChevronDown, ChevronUp, BookOpen, PenLine, X, ImagePlus, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getAllDecks, getStudyQueue, getStudyQueueForDecks, getSRSState, setSRSState, getDeckSRSSettings } from "@/lib/store";
+import { getAllDecks, getStudyQueue, getStudyQueueForDecks, getSRSState, setSRSState, getDeckSRSSettings, getStudyMode, updateCard } from "@/lib/store";
 import type { QueueItem } from "@/lib/store";
 import { schedule, previewIntervals } from "@/lib/srs";
 import type { Rating } from "@/lib/srs";
@@ -97,6 +97,8 @@ export default function StudyPage() {
   const params = useParams();
   const deckId = params.id as string;
 
+  const studyMode = getStudyMode();
+
   // Deck meta (title, emoji, category)
   const deck = getAllDecks().find((d) => d.id === deckId) ?? null;
 
@@ -160,6 +162,58 @@ export default function StudyPage() {
 
   // Retro
   const [retroAdded, setRetroAdded] = useState(false);
+
+  // Card edit modal
+  const [editOpen, setEditOpen]           = useState(false);
+  const [editFront, setEditFront]         = useState("");
+  const [editBack, setEditBack]           = useState("");
+  const [editFrontImage, setEditFrontImage] = useState<string | null>(null);
+  const [editBackImage, setEditBackImage]   = useState<string | null>(null);
+  const frontImgRef = useRef<HTMLInputElement>(null);
+  const backImgRef  = useRef<HTMLInputElement>(null);
+
+  function openEdit() {
+    if (!currentCard) return;
+    setEditFront(currentCard.front);
+    setEditBack(currentCard.back);
+    setEditFrontImage(currentCard.frontImageUrl ?? null);
+    setEditBackImage(currentCard.backImageUrl ?? null);
+    setEditOpen(true);
+  }
+
+  function saveEdit() {
+    if (!currentItem) return;
+    const front = editFront.trim() || currentCard!.front;
+    const back  = editBack.trim()  || currentCard!.back;
+    // store accepts null (= explicitly removed)
+    updateCard(currentItem.deckId, currentItem.card.id, {
+      front, back,
+      frontImageUrl: editFrontImage,
+      backImageUrl:  editBackImage,
+    });
+    // Card type only accepts string | undefined, so null → undefined
+    setQueue(q => q.map((item, i) =>
+      i === pos
+        ? { ...item, card: { ...item.card, front, back,
+            frontImageUrl: editFrontImage ?? undefined,
+            backImageUrl:  editBackImage  ?? undefined } }
+        : item,
+    ));
+    setEditOpen(false);
+  }
+
+  function handleImgUpload(e: React.ChangeEvent<HTMLInputElement>, side: "front" | "back") {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const url = ev.target?.result as string;
+      if (side === "front") setEditFrontImage(url);
+      else setEditBackImage(url);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
 
   // ── Load calendar events ───────────────────────────────────────────────────
   useEffect(() => {
@@ -240,10 +294,14 @@ export default function StudyPage() {
         else rate(3); // Space after flip = Good
       }
       if (isFlipped) {
-        if (e.key === "1") { e.preventDefault(); rate(1); }
-        if (e.key === "2") { e.preventDefault(); rate(2); }
-        if (e.key === "3") { e.preventDefault(); rate(3); }
-        if (e.key === "4") { e.preventDefault(); rate(4); }
+        if (studyMode === "simple") {
+          if (e.key === "1") { e.preventDefault(); rate(1); }
+        } else {
+          if (e.key === "1") { e.preventDefault(); rate(1); }
+          if (e.key === "2") { e.preventDefault(); rate(2); }
+          if (e.key === "3") { e.preventDefault(); rate(3); }
+          if (e.key === "4") { e.preventDefault(); rate(4); }
+        }
       }
     };
     window.addEventListener("keydown", handler);
@@ -461,15 +519,24 @@ export default function StudyPage() {
           <Clock className="h-3.5 w-3.5" />
           {autoRevealActive && !isFlipped ? `${autoRevealSecs}s` : "20s"}
         </button>
+        <button
+          onClick={openEdit}
+          title="Karte bearbeiten"
+          className="flex items-center justify-center rounded-lg bg-muted px-2.5 py-1.5 text-muted-foreground transition-all hover:bg-muted/80 hover:text-foreground shrink-0"
+        >
+          <PenLine className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {/* Queue progress */}
       <div className="flex items-center gap-3">
-        <div className="flex h-8 shrink-0 items-center gap-2 rounded-full bg-muted px-3 text-xs font-medium">
-          {newCount > 0 && <span className="text-blue-500 font-bold">{newCount} Neu</span>}
-          {revCount > 0 && <span className="text-emerald-600 font-bold">{revCount} Wdh.</span>}
-          {lrnCount > 0 && <span className="text-amber-500 font-bold">{lrnCount} Lernen</span>}
-        </div>
+        {studyMode === "expert" && (
+          <div className="flex h-8 shrink-0 items-center gap-2 rounded-full bg-muted px-3 text-xs font-medium">
+            {newCount > 0 && <span className="text-blue-500 font-bold">{newCount} Neu</span>}
+            {revCount > 0 && <span className="text-emerald-600 font-bold">{revCount} Wdh.</span>}
+            {lrnCount > 0 && <span className="text-amber-500 font-bold">{lrnCount} Lernen</span>}
+          </div>
+        )}
         <div className="flex-1 h-2 overflow-hidden rounded-full bg-muted">
           <div
             className="h-full rounded-full bg-primary transition-all duration-500"
@@ -492,6 +559,12 @@ export default function StudyPage() {
             <div className="flex h-full flex-col items-center justify-center rounded-2xl border-2 bg-card p-8 shadow-lg transition-shadow hover:shadow-xl">
               <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Frage</p>
               <p className="text-center text-2xl font-semibold leading-snug">{currentCard.front}</p>
+              {currentCard.frontImageUrl && (
+                <div className="mt-5 flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={currentCard.frontImageUrl} alt="Fragenbild" className="max-h-28 max-w-full rounded-xl object-contain shadow-sm" />
+                </div>
+              )}
               <div className="mt-6 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <RotateCcw className="h-3.5 w-3.5" />Tippe zum Umdrehen
               </div>
@@ -519,7 +592,7 @@ export default function StudyPage() {
       </div>
 
       {/* AI Erklärung Panel */}
-      {isFlipped && (
+      {isFlipped && studyMode === "expert" && (
         <div className="overflow-hidden rounded-xl border border-violet-500/20 bg-violet-500/5">
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
             <div className="flex items-center gap-2">
@@ -612,32 +685,161 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* ── Rating buttons (4-point FSRS scale) ── */}
-      <div
-        className={cn(
-          "grid grid-cols-4 gap-2 transition-all duration-300",
-          isFlipped ? "opacity-100" : "opacity-0 pointer-events-none",
-        )}
-      >
-        {RATING_CONFIG.map(({ rating, label, bg, text, border }, i) => (
+      {/* ── Rating buttons ── */}
+      {studyMode === "simple" ? (
+        <div
+          className={cn(
+            "grid grid-cols-2 gap-3 transition-all duration-300",
+            isFlipped ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
+        >
           <button
-            key={rating}
-            onClick={() => rate(rating)}
-            className={cn(
-              "flex flex-col items-center rounded-xl border py-3 px-2 transition-all active:scale-95",
-              bg, text, border,
-            )}
+            onClick={() => rate(1)}
+            className="flex flex-col items-center rounded-2xl border border-rose-500/20 bg-rose-500/10 py-5 px-4 transition-all active:scale-95 hover:bg-rose-500/20"
           >
-            <span className="text-sm font-semibold">{label}</span>
-            <span className="mt-0.5 text-[11px] opacity-60">{previews[i]}</span>
+            <span className="text-2xl mb-1">✗</span>
+            <span className="text-base font-bold text-rose-600 dark:text-rose-400">Nochmal</span>
           </button>
-        ))}
-      </div>
+          <button
+            onClick={() => rate(3)}
+            className="flex flex-col items-center rounded-2xl border border-emerald-500/20 bg-emerald-500/10 py-5 px-4 transition-all active:scale-95 hover:bg-emerald-500/20"
+          >
+            <span className="text-2xl mb-1">✓</span>
+            <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">Wusste ich</span>
+          </button>
+        </div>
+      ) : (
+        <div
+          className={cn(
+            "grid grid-cols-4 gap-2 transition-all duration-300",
+            isFlipped ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
+        >
+          {RATING_CONFIG.map(({ rating, label, bg, text, border }, i) => (
+            <button
+              key={rating}
+              onClick={() => rate(rating)}
+              className={cn(
+                "flex flex-col items-center rounded-xl border py-3 px-2 transition-all active:scale-95",
+                bg, text, border,
+              )}
+            >
+              <span className="text-sm font-semibold">{label}</span>
+              <span className="mt-0.5 text-[11px] opacity-60">{previews[i]}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {!isFlipped && (
         <p className="text-center text-xs text-muted-foreground">
-          Tippe die Karte um · dann <kbd className="rounded border px-1 font-mono text-[10px]">1</kbd>–<kbd className="rounded border px-1 font-mono text-[10px]">4</kbd> oder <kbd className="rounded border px-1 font-mono text-[10px]">Leertaste</kbd>
+          {studyMode === "simple"
+            ? <>Tippe die Karte um · dann <kbd className="rounded border px-1 font-mono text-[10px]">Leertaste</kbd></>
+            : <>Tippe die Karte um · dann <kbd className="rounded border px-1 font-mono text-[10px]">1</kbd>–<kbd className="rounded border px-1 font-mono text-[10px]">4</kbd> oder <kbd className="rounded border px-1 font-mono text-[10px]">Leertaste</kbd></>
+          }
         </p>
+      )}
+
+      {/* ── Card edit modal ── */}
+      {editOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setEditOpen(false)} />
+          <div className="relative z-10 w-full max-w-lg rounded-2xl border bg-card shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <div className="flex items-center gap-2">
+                <PenLine className="h-4 w-4 text-muted-foreground" />
+                <span className="font-semibold text-sm">Karte bearbeiten</span>
+              </div>
+              <button onClick={() => setEditOpen(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="max-h-[70vh] overflow-y-auto p-5 space-y-5">
+              {/* Vorderseite */}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Vorderseite</label>
+                <textarea
+                  value={editFront}
+                  onChange={e => setEditFront(e.target.value)}
+                  rows={3}
+                  className="w-full resize-none rounded-xl border bg-muted/30 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+                  placeholder="Vorderseite…"
+                />
+                {editFrontImage ? (
+                  <div className="relative inline-flex">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={editFrontImage} alt="Vorderseitenbild" className="h-24 rounded-xl object-contain border" />
+                    <button
+                      onClick={() => setEditFrontImage(null)}
+                      className="absolute -right-2 -top-2 rounded-full bg-destructive p-1 text-destructive-foreground shadow"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => frontImgRef.current?.click()}
+                    className="flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    <ImagePlus className="h-3.5 w-3.5" />Bild hinzufügen
+                  </button>
+                )}
+                <input ref={frontImgRef} type="file" accept="image/*" className="hidden" onChange={e => handleImgUpload(e, "front")} />
+              </div>
+
+              {/* Rückseite */}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Rückseite</label>
+                <textarea
+                  value={editBack}
+                  onChange={e => setEditBack(e.target.value)}
+                  rows={3}
+                  className="w-full resize-none rounded-xl border bg-muted/30 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+                  placeholder="Rückseite…"
+                />
+                {editBackImage ? (
+                  <div className="relative inline-flex">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={editBackImage} alt="Rückseitenbild" className="h-24 rounded-xl object-contain border" />
+                    <button
+                      onClick={() => setEditBackImage(null)}
+                      className="absolute -right-2 -top-2 rounded-full bg-destructive p-1 text-destructive-foreground shadow"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => backImgRef.current?.click()}
+                    className="flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    <ImagePlus className="h-3.5 w-3.5" />Bild hinzufügen
+                  </button>
+                )}
+                <input ref={backImgRef} type="file" accept="image/*" className="hidden" onChange={e => handleImgUpload(e, "back")} />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 border-t px-5 py-4">
+              <button
+                onClick={() => setEditOpen(false)}
+                className="rounded-xl border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={saveEdit}
+                className="rounded-xl bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Speichern
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

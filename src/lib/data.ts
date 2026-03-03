@@ -17,7 +17,8 @@ export interface Card {
   // Basic
   front: string;
   back: string;
-  // Back image (for basic cards)
+  // Card images
+  frontImageUrl?: string;
   backImageUrl?: string;
   // Image Occlusion
   imageUrl?: string;

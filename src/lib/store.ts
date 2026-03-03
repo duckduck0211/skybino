@@ -8,6 +8,7 @@ const MOCK_ADDITIONS_KEY = "synapze-mock-additions";
 const MOCK_OVERRIDES_KEY = "synapze-mock-overrides";
 const MOCK_HIDDEN_KEY    = "synapze-mock-hidden";
 const BACKUPS_KEY        = "synapze-backups";
+const CARD_EDITS_KEY     = "synapze-card-edits";
 
 // ─── User Decks ───────────────────────────────────────────────────────────────
 
@@ -29,6 +30,59 @@ export function createUserDeck(deck: Deck): void {
   const list = getUserDecks();
   list.push(deck);
   saveUserDecks(list);
+}
+
+// ─── Card edits (per-card overrides for any deck) ────────────────────────────
+
+type CardEdit = { front?: string; back?: string; frontImageUrl?: string | null; backImageUrl?: string | null };
+type CardEditsStore = Record<string, CardEdit>; // key: `${deckId}:${cardId}`
+
+function getCardEdits(): CardEditsStore {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(CARD_EDITS_KEY);
+    return raw ? (JSON.parse(raw) as CardEditsStore) : {};
+  } catch { return {}; }
+}
+
+export function updateCard(
+  deckId: string,
+  cardId: string,
+  updates: { front?: string; back?: string; frontImageUrl?: string | null; backImageUrl?: string | null },
+): void {
+  const cardUpdates = {
+    ...(updates.front !== undefined && { front: updates.front }),
+    ...(updates.back !== undefined && { back: updates.back }),
+    frontImageUrl: updates.frontImageUrl ?? undefined,
+    backImageUrl: updates.backImageUrl ?? undefined,
+  };
+
+  // User deck: update card directly
+  if (!MOCK_IDS.has(deckId)) {
+    const list = getUserDecks();
+    const di = list.findIndex((d) => d.id === deckId);
+    if (di === -1) return;
+    const ci = list[di].cards.findIndex((c) => c.id === cardId);
+    if (ci === -1) return;
+    list[di].cards[ci] = { ...list[di].cards[ci], ...cardUpdates };
+    saveUserDecks(list);
+    return;
+  }
+  // Mock deck added card: update in additions store
+  const additions = getMockAdditions();
+  const added = additions[deckId];
+  if (added) {
+    const ci = added.findIndex((c) => c.id === cardId);
+    if (ci !== -1) {
+      added[ci] = { ...added[ci], ...cardUpdates };
+      saveMockAdditions(additions);
+      return;
+    }
+  }
+  // Mock deck original card: store as edit override
+  const edits = getCardEdits();
+  edits[`${deckId}:${cardId}`] = { ...edits[`${deckId}:${cardId}`], ...updates };
+  localStorage.setItem(CARD_EDITS_KEY, JSON.stringify(edits));
 }
 
 // ─── Mock-Deck additions ─────────────────────────────────────────────────────
@@ -68,17 +122,30 @@ export function addCardsToDeck(deckId: string, newCards: Card[]): boolean {
 
 // ─── Merge all decks ─────────────────────────────────────────────────────────
 
-/** Returns mock decks (with any user additions/overrides) + user-created decks. */
+/** Returns mock decks (with any user additions/overrides/card-edits) + user-created decks. */
 export function getAllDecks(): Deck[] {
   const additions = getMockAdditions();
   const overrides = getMockOverrides();
   const hidden = getMockHidden();
+  const cardEdits = getCardEdits();
   const augmentedMock: Deck[] = mockDecks
     .filter((d) => !hidden.includes(d.id))
     .map((d) => {
+      // Apply per-card edits to original mock cards
+      const editedCards = d.cards.map((c) => {
+        const edit = cardEdits[`${d.id}:${c.id}`];
+        if (!edit) return c;
+        return {
+          ...c,
+          ...(edit.front !== undefined && { front: edit.front }),
+          ...(edit.back  !== undefined && { back:  edit.back  }),
+          frontImageUrl: "frontImageUrl" in edit ? (edit.frontImageUrl ?? undefined) : c.frontImageUrl,
+          backImageUrl:  "backImageUrl"  in edit ? (edit.backImageUrl  ?? undefined) : c.backImageUrl,
+        };
+      });
       const withCards = additions[d.id]
-        ? { ...d, cards: [...d.cards, ...additions[d.id]!] }
-        : d;
+        ? { ...d, cards: [...editedCards, ...additions[d.id]!] }
+        : { ...d, cards: editedCards };
       const ov = overrides[d.id];
       return ov ? { ...withCards, title: ov.title, emoji: ov.emoji } : withCards;
     });
@@ -228,6 +295,7 @@ const SYNC_KEYS = [
   MOCK_ADDITIONS_KEY,
   MOCK_OVERRIDES_KEY,
   MOCK_HIDDEN_KEY,
+  CARD_EDITS_KEY,
   "synapze-theme",
   "synapze-profile",
   "synapze-folders",
@@ -368,6 +436,40 @@ export function getStudyQueueForDecks(deckIds: string[]): QueueItem[] {
     if (!b.srs) return -1;
     return a.srs.due.localeCompare(b.srs.due);
   });
+}
+
+// ─── Study Mode ───────────────────────────────────────────────────────────────
+
+/**
+ * Derives the current study mode from the user profile.
+ * - Klasse 5–8  → always "simple"
+ * - Klasse 9    → "simple" by default, "expert" if explicitly toggled on
+ * - Klasse 10+  → "expert" by default, "simple" if explicitly toggled off
+ * - studium / unknown → "expert"
+ */
+export function getStudyMode(): "simple" | "expert" {
+  if (typeof window === "undefined") return "expert";
+  try {
+    const raw = localStorage.getItem("synapze-profile");
+    if (!raw) return "expert";
+    const profile = JSON.parse(raw);
+    const schuljahr: string = profile.schuljahr ?? "";
+    const expertMode: boolean | undefined = profile.expertMode;
+    const match = schuljahr.match(/^klasse-(\d+)$/);
+    if (!match) return "expert"; // studium-* or empty
+    const grade = parseInt(match[1]);
+    if (grade <= 8) return "simple";
+    if (grade === 9) return expertMode === true ? "expert" : "simple";
+    return expertMode === false ? "simple" : "expert"; // 10+: default expert
+  } catch { return "expert"; }
+}
+
+export function setExpertMode(value: boolean): void {
+  if (typeof window === "undefined") return;
+  const raw = localStorage.getItem("synapze-profile");
+  const profile = raw ? JSON.parse(raw) : {};
+  profile.expertMode = value;
+  localStorage.setItem("synapze-profile", JSON.stringify(profile));
 }
 
 // ─── Flat card list (re-exported helper) ─────────────────────────────────────

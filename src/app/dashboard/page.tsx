@@ -39,6 +39,7 @@ import {
   deleteDocFromFolder,
   getDeckRegime,
   setDeckRegime,
+  getStudyMode,
 } from "@/lib/store";
 import type { Deck } from "@/lib/data";
 import type { UserFolder, FolderDoc } from "@/lib/store";
@@ -163,11 +164,13 @@ function DeckCard({
   onDelete,
   onRename,
   onRefresh,
+  isSimple = false,
 }: {
   deck: Deck;
   onDelete: () => void;
   onRename: (newTitle: string, newEmoji: string) => void;
   onRefresh: () => void;
+  isSimple?: boolean;
 }) {
   const mastered = deck.masteredCount ?? 0;
   const total = deck.cards.length;
@@ -250,16 +253,20 @@ function DeckCard({
         ) : (
           <>
             <div className="flex items-center gap-3 min-w-0">
-              <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl", deck.color ?? "bg-violet-500")}>
+              <div className={cn(
+                "flex shrink-0 items-center justify-center rounded-xl",
+                isSimple ? "h-14 w-14 text-3xl" : "h-10 w-10 text-xl",
+                deck.color ?? "bg-violet-500"
+              )}>
                 {deck.emoji ?? "📚"}
               </div>
               <div className="min-w-0">
-                <p className="truncate font-semibold leading-snug">{deck.title}</p>
+                <p className={cn("truncate font-semibold leading-snug", isSimple && "text-base")}>{deck.title}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">{total} Karten · {deck.category}</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
+            {!isSimple && <div className="flex items-center gap-1">
               {/* "+" dropdown: Karten hinzufügen / Sub-Kapitel erstellen */}
               <div className="relative" ref={addMenuRef}>
                 <button
@@ -366,7 +373,7 @@ function DeckCard({
                   </div>
                 )}
               </div>
-            </div>
+            </div>}
           </>
         )}
       </div>
@@ -886,6 +893,8 @@ export default function DashboardPage() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [filter, setFilter] = useState<"alle" | "von-dir">("von-dir");
   const [filterOpen, setFilterOpen] = useState(false);
+  const studyMode = getStudyMode();
+  const isSimple = studyMode === "simple";
 
   const refresh = () => setDecks(getAllDecks());
 
@@ -956,8 +965,8 @@ export default function DashboardPage() {
         </nav>
       </div>
 
-      {/* ── Filter row (only on Decks tab) ── */}
-      {tab === "decks" && decks.length > 0 && (
+      {/* ── Filter row (only on Decks tab, expert mode) ── */}
+      {tab === "decks" && decks.length > 0 && !isSimple && (
         <div className="relative">
           <button
             onClick={() => setFilterOpen((p) => !p)}
@@ -989,7 +998,7 @@ export default function DashboardPage() {
         rootDecks.length === 0 ? (
           <EmptyState icon={BookOpen} title="Du hast noch keine Decks erstellt" description="Erstelle ein Deck, um deine Lernkarten zu organisieren." actionLabel="Deck erstellen" actionHref="/create" />
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className={cn("grid gap-4", isSimple ? "grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-3")}>
             {rootDecks.map((deck) => (
               <DeckCard
                 key={deck.id}
@@ -997,6 +1006,7 @@ export default function DashboardPage() {
                 onDelete={() => handleDelete(deck.id)}
                 onRename={(t, e) => handleRename(deck.id, t, e)}
                 onRefresh={refresh}
+                isSimple={isSimple}
               />
             ))}
             <Link href="/create" className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-muted py-10 text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-primary">
