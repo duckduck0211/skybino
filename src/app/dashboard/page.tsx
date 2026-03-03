@@ -9,6 +9,7 @@ import {
   BookOpen,
   Zap,
   ChevronDown,
+  ChevronRight,
   Play,
   MoreHorizontal,
   PenLine,
@@ -21,21 +22,28 @@ import {
   FileText,
   File,
   Download,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   getAllDecks,
-  deleteUserDeck,
-  renameUserDeck,
+  deleteDeck,
+  renameDeck,
+  getSubDecks,
+  createUserDeck,
   getFolders,
   createUserFolder,
   deleteUserFolder,
   renameUserFolder,
   addDocToFolder,
   deleteDocFromFolder,
+  getDeckRegime,
+  setDeckRegime,
 } from "@/lib/store";
 import type { Deck } from "@/lib/data";
 import type { UserFolder, FolderDoc } from "@/lib/store";
+import { REGIME_PRESETS } from "@/lib/srs";
+import type { RegimeKey } from "@/lib/srs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,28 +83,112 @@ function EmptyState({
   );
 }
 
+// ─── Sub-Deck Row ─────────────────────────────────────────────────────────────
+
+function SubDeckRow({ deck, onDelete }: { deck: Deck; onDelete: () => void }) {
+  const total = deck.cards.length;
+  const mastered = deck.masteredCount ?? 0;
+  const pct = total > 0 ? Math.round((mastered / total) * 100) : 0;
+
+  return (
+    <div className="group/sub flex items-center gap-2.5 rounded-xl border bg-muted/30 px-3 py-2 transition-all hover:bg-muted/50">
+      <div className="w-px h-4 shrink-0 rounded-full bg-border ml-1" />
+      <span className="text-base shrink-0">{deck.emoji ?? "📚"}</span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium leading-snug">{deck.title}</p>
+        <p className="text-[11px] text-muted-foreground">{total} Karten</p>
+      </div>
+      {total > 0 && (
+        <div className="hidden w-14 shrink-0 sm:block">
+          <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary/60" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )}
+      <Link href={`/study/${deck.id}`} title="Lernen" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-all hover:bg-primary/20">
+        <Play className="h-3.5 w-3.5" />
+      </Link>
+      <Link href={`/quiz/${deck.id}`} title="Quiz" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-all hover:bg-muted">
+        <Zap className="h-3.5 w-3.5" />
+      </Link>
+      <button onClick={onDelete} title="Löschen" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover/sub:opacity-100">
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+// ─── Inline Sub-Deck Form ─────────────────────────────────────────────────────
+
+function InlineSubDeckForm({ onSave, onCancel }: { onSave: (title: string, emoji: string) => void; onCancel: () => void }) {
+  const [title, setTitle] = useState("");
+  const [emoji, setEmoji] = useState("📖");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleSave = () => { if (title.trim()) onSave(title.trim(), emoji); };
+
+  return (
+    <div className="mt-3 space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Neues Sub-Kapitel</p>
+      <div className="flex items-center gap-2">
+        <input
+          value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={2}
+          className="w-10 shrink-0 rounded-lg border bg-background px-1 py-1 text-center text-base outline-none focus:ring-2 focus:ring-primary"
+        />
+        <input
+          ref={inputRef} value={title} onChange={(e) => setTitle(e.target.value)}
+          placeholder="Titel des Sub-Kapitels"
+          onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") onCancel(); }}
+          className="min-w-0 flex-1 rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button onClick={handleSave} disabled={!title.trim()} className="flex-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors">
+          Erstellen
+        </button>
+        <button onClick={onCancel} className="flex-1 rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-muted transition-colors">
+          Abbrechen
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Deck Card ────────────────────────────────────────────────────────────────
 
 function DeckCard({
   deck,
   onDelete,
   onRename,
+  onRefresh,
 }: {
   deck: Deck;
   onDelete: () => void;
   onRename: (newTitle: string, newEmoji: string) => void;
+  onRefresh: () => void;
 }) {
   const mastered = deck.masteredCount ?? 0;
   const total = deck.cards.length;
   const pct = total > 0 ? Math.round((mastered / total) * 100) : 0;
-  const isUserDeck = deck.id.startsWith("user-");
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [regimePicker, setRegimePicker] = useState(false);
+  const [currentRegime, setCurrentRegime] = useState<RegimeKey>(() => getDeckRegime(deck.id));
   const [renaming, setRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState(deck.title);
   const [newEmoji, setNewEmoji] = useState(deck.emoji ?? "📚");
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const [creatingSubDeck, setCreatingSubDeck] = useState(false);
+  const [subDecksOpen, setSubDecksOpen] = useState(false);
+  const [subDecks, setSubDecks] = useState<Deck[]>([]);
+
+  useEffect(() => { setSubDecks(getSubDecks(deck.id)); }, [deck.id]);
 
   useEffect(() => {
     setNewTitle(deck.title);
@@ -107,13 +199,21 @@ function DeckCard({
     if (!menuOpen) return;
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-        setConfirmDelete(false);
+        setMenuOpen(false); setConfirmDelete(false); setRegimePicker(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) setAddMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [addMenuOpen]);
 
   const handleRename = () => {
     if (!newTitle.trim()) return;
@@ -127,28 +227,19 @@ function DeckCard({
     setRenaming(false);
   };
 
+  const hasSubDecks = subDecks.length > 0;
+
   return (
     <div className="group relative flex flex-col rounded-2xl border bg-card p-5 transition-all hover:border-primary/30 hover:shadow-md">
 
       <div className="flex items-start justify-between gap-3">
         {renaming ? (
           <div className="flex flex-1 items-center gap-2 min-w-0">
-            <input
-              value={newEmoji}
-              onChange={(e) => setNewEmoji(e.target.value)}
-              maxLength={2}
-              className="w-11 shrink-0 rounded-xl border bg-background px-1.5 py-1 text-center text-xl outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-            />
-            <input
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleRename();
-                if (e.key === "Escape") cancelRename();
-              }}
-              className="min-w-0 flex-1 rounded-xl border bg-background px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-            />
+            <input value={newEmoji} onChange={(e) => setNewEmoji(e.target.value)} maxLength={2}
+              className="w-11 shrink-0 rounded-xl border bg-background px-1.5 py-1 text-center text-xl outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1" />
+            <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") handleRename(); if (e.key === "Escape") cancelRename(); }}
+              className="min-w-0 flex-1 rounded-xl border bg-background px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1" />
             <button onClick={handleRename} title="Speichern" className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
               <Check className="h-3.5 w-3.5" />
             </button>
@@ -169,66 +260,118 @@ function DeckCard({
             </div>
 
             <div className="flex items-center gap-1">
-              <Link
-                href={`/create?deckId=${deck.id}&mode=add`}
-                title="Karten hinzufügen"
-                className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 group-hover:opacity-100 transition-all hover:bg-primary/10 hover:text-primary"
-              >
-                <Plus className="h-4 w-4" />
-              </Link>
-
-              {isUserDeck && (
-                <div className="relative" ref={menuRef}>
-                  <button
-                    onClick={() => { setMenuOpen(!menuOpen); setConfirmDelete(false); }}
-                    title="Bearbeiten"
-                    className={cn(
-                      "shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-muted hover:text-foreground",
-                      menuOpen ? "opacity-100 bg-muted text-foreground" : "opacity-0 group-hover:opacity-100",
-                    )}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-
-                  {menuOpen && (
-                    <div className="absolute right-0 top-full z-20 mt-1.5 w-52 overflow-hidden rounded-2xl border bg-popover shadow-2xl ring-1 ring-black/5">
-                      {!confirmDelete ? (
-                        <div className="p-1.5">
-                          <button onClick={() => { setRenaming(true); setMenuOpen(false); }} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-accent">
-                            <PenLine className="h-4 w-4 text-muted-foreground" />Umbenennen
-                          </button>
-                          <button className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent">
-                            <Share2 className="h-4 w-4" />Teilen
-                            <span className="ml-auto text-[11px] opacity-50">Bald</span>
-                          </button>
-                          <div className="my-1 border-t" />
-                          <button onClick={() => setConfirmDelete(true)} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-destructive transition-colors hover:bg-destructive/10">
-                            <Trash2 className="h-4 w-4" />Löschen
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="p-4 space-y-3">
-                          <div>
-                            <p className="font-semibold text-sm">Deck wirklich löschen?</p>
-                            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                              Alle Karten in <span className="font-medium">&ldquo;{deck.title}&rdquo;</span> werden dauerhaft entfernt.
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button onClick={() => { setMenuOpen(false); setConfirmDelete(false); onDelete(); }} className="flex-1 rounded-xl bg-destructive px-3 py-2 text-xs font-semibold text-destructive-foreground hover:bg-destructive/90 transition-colors">Löschen</button>
-                            <button onClick={() => setConfirmDelete(false)} className="flex-1 rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted transition-colors">Abbrechen</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+              {/* "+" dropdown: Karten hinzufügen / Sub-Kapitel erstellen */}
+              <div className="relative" ref={addMenuRef}>
+                <button
+                  onClick={() => setAddMenuOpen((p) => !p)}
+                  title="Hinzufügen"
+                  className={cn(
+                    "shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary",
+                    addMenuOpen ? "opacity-100 bg-primary/10 text-primary" : "opacity-0 group-hover:opacity-100",
                   )}
-                </div>
-              )}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+                {addMenuOpen && (
+                  <div className="absolute right-0 top-full z-20 mt-1.5 w-52 overflow-hidden rounded-2xl border bg-popover shadow-2xl ring-1 ring-black/5">
+                    <div className="p-1.5">
+                      <Link href={`/create?deckId=${deck.id}&mode=add`} onClick={() => setAddMenuOpen(false)}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-accent">
+                        <Plus className="h-4 w-4 text-muted-foreground" />Karten hinzufügen
+                      </Link>
+                      <button onClick={() => { setAddMenuOpen(false); setCreatingSubDeck(true); }}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-accent">
+                        <Layers className="h-4 w-4 text-muted-foreground" />Sub-Kapitel erstellen
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* "⋯" edit menu */}
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => { setMenuOpen(!menuOpen); setConfirmDelete(false); }}
+                  title="Bearbeiten"
+                  className={cn(
+                    "shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-muted hover:text-foreground",
+                    menuOpen ? "opacity-100 bg-muted text-foreground" : "opacity-0 group-hover:opacity-100",
+                  )}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 top-full z-20 mt-1.5 w-52 overflow-hidden rounded-2xl border bg-popover shadow-2xl ring-1 ring-black/5">
+                    {confirmDelete ? (
+                      <div className="p-4 space-y-3">
+                        <div>
+                          <p className="font-semibold text-sm">Deck wirklich löschen?</p>
+                          <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                            Alle Karten in <span className="font-medium">&ldquo;{deck.title}&rdquo;</span> werden dauerhaft entfernt.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => { setMenuOpen(false); setConfirmDelete(false); onDelete(); }} className="flex-1 rounded-xl bg-destructive px-3 py-2 text-xs font-semibold text-destructive-foreground hover:bg-destructive/90 transition-colors">Löschen</button>
+                          <button onClick={() => setConfirmDelete(false)} className="flex-1 rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted transition-colors">Abbrechen</button>
+                        </div>
+                      </div>
+                    ) : regimePicker ? (
+                      <div className="p-3 space-y-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <button onClick={() => setRegimePicker(false)} className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-muted text-muted-foreground">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Lernmodus</p>
+                        </div>
+                        {(Object.entries(REGIME_PRESETS) as [RegimeKey, typeof REGIME_PRESETS[RegimeKey]][]).map(([key, preset]) => (
+                          <button
+                            key={key}
+                            onClick={() => { setDeckRegime(deck.id, key); setCurrentRegime(key); setRegimePicker(false); setMenuOpen(false); }}
+                            className={cn(
+                              "w-full rounded-xl border p-2.5 text-left transition-all",
+                              currentRegime === key ? "border-primary/40 bg-primary/5" : "hover:bg-accent",
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{preset.emoji}</span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold leading-snug">{preset.label}</p>
+                                <p className="mt-0.5 text-[10px] text-muted-foreground leading-relaxed">{preset.description}</p>
+                              </div>
+                              {currentRegime === key && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-1.5">
+                        <button onClick={() => { setRenaming(true); setMenuOpen(false); }} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-accent">
+                          <PenLine className="h-4 w-4 text-muted-foreground" />Umbenennen
+                        </button>
+                        <button onClick={() => setRegimePicker(true)} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-accent">
+                          <span className="text-base leading-none">{REGIME_PRESETS[currentRegime].emoji}</span>
+                          <span>Lernmodus</span>
+                          <span className="ml-auto text-[11px] text-muted-foreground">{REGIME_PRESETS[currentRegime].label}</span>
+                        </button>
+                        <button className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent">
+                          <Share2 className="h-4 w-4" />Teilen
+                          <span className="ml-auto text-[11px] opacity-50">Bald</span>
+                        </button>
+                        <div className="my-1 border-t" />
+                        <button onClick={() => setConfirmDelete(true)} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-destructive transition-colors hover:bg-destructive/10">
+                          <Trash2 className="h-4 w-4" />Löschen
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
       </div>
 
+      {/* Progress bar */}
       {total > 0 && (
         <div className="mt-4">
           <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
@@ -241,11 +384,70 @@ function DeckCard({
         </div>
       )}
 
+      {/* Sub-Kapitel accordion toggle */}
+      {hasSubDecks && (
+        <button
+          onClick={() => setSubDecksOpen((p) => !p)}
+          className="mt-3 flex items-center gap-1 rounded-lg px-0.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-150", subDecksOpen && "rotate-90")} />
+          {subDecks.length} Sub-Kapitel
+        </button>
+      )}
+
+      {/* Sub-deck rows */}
+      {subDecksOpen && hasSubDecks && (
+        <div className="mt-1.5 space-y-1.5">
+          {subDecks.map((sub) => (
+            <SubDeckRow
+              key={sub.id}
+              deck={sub}
+              onDelete={() => {
+                deleteDeck(sub.id);
+                setSubDecks(getSubDecks(deck.id));
+                onRefresh();
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Inline sub-deck creation form */}
+      {creatingSubDeck && (
+        <InlineSubDeckForm
+          onSave={(title, emoji) => {
+            createUserDeck({
+              id: `user-${Date.now()}`,
+              title,
+              emoji,
+              description: "",
+              category: deck.category,
+              color: deck.color,
+              cards: [],
+              masteredCount: 0,
+              parentId: deck.id,
+            });
+            setCreatingSubDeck(false);
+            setSubDecks(getSubDecks(deck.id));
+            setSubDecksOpen(true);
+            onRefresh();
+          }}
+          onCancel={() => setCreatingSubDeck(false)}
+        />
+      )}
+
+      {/* Lernen / Quiz buttons */}
       <div className="mt-4 flex gap-2">
-        <Link href={`/study/${deck.id}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-all hover:bg-primary/90">
+        <Link
+          href={hasSubDecks ? `/study/${deck.id}?includeSubDecks=true` : `/study/${deck.id}`}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-all hover:bg-primary/90"
+        >
           <Play className="h-3.5 w-3.5" />Lernen
         </Link>
-        <Link href={`/quiz/${deck.id}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all hover:bg-muted">
+        <Link
+          href={hasSubDecks ? `/quiz/${deck.id}?includeSubDecks=true` : `/quiz/${deck.id}`}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all hover:bg-muted"
+        >
           <Zap className="h-3.5 w-3.5" />Quiz
         </Link>
       </div>
@@ -698,9 +900,15 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleDelete = (deckId: string) => { deleteUserDeck(deckId); refresh(); };
+  const handleDelete = (deckId: string) => {
+    getSubDecks(deckId).forEach((sub) => deleteDeck(sub.id));
+    deleteDeck(deckId);
+    refresh();
+  };
+  const rootDecks = decks.filter((d) => !d.parentId);
+
   const handleRename = (deckId: string, newTitle: string, newEmoji: string) => {
-    renameUserDeck(deckId, newTitle, newEmoji);
+    renameDeck(deckId, newTitle, newEmoji);
     refresh();
   };
 
@@ -778,16 +986,17 @@ export default function DashboardPage() {
       {/* ── Tab content ── */}
 
       {tab === "decks" && (
-        decks.length === 0 ? (
+        rootDecks.length === 0 ? (
           <EmptyState icon={BookOpen} title="Du hast noch keine Decks erstellt" description="Erstelle ein Deck, um deine Lernkarten zu organisieren." actionLabel="Deck erstellen" actionHref="/create" />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {decks.map((deck) => (
+            {rootDecks.map((deck) => (
               <DeckCard
                 key={deck.id}
                 deck={deck}
                 onDelete={() => handleDelete(deck.id)}
                 onRename={(t, e) => handleRename(deck.id, t, e)}
+                onRefresh={refresh}
               />
             ))}
             <Link href="/create" className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-muted py-10 text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/5 hover:text-primary">

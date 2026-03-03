@@ -147,6 +147,7 @@
   inset: 0;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  transform: rotateY(0deg); /* forces 3D context so backface-visibility works */
 }
 
 .flip-card-back {

@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, RotateCcw, CheckCircle2, XCircle, Lightbulb, Clock,
+  ArrowLeft, RotateCcw, Lightbulb, Clock,
   CalendarDays, Sparkles, MessageSquare, Send, ChevronDown, ChevronUp, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getDeckById } from "@/lib/data";
+import { getAllDecks, getStudyQueue, getStudyQueueForDecks, getSRSState, setSRSState, getDeckSRSSettings } from "@/lib/store";
+import type { QueueItem } from "@/lib/store";
+import { schedule, previewIntervals } from "@/lib/srs";
+import type { Rating } from "@/lib/srs";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -79,21 +82,62 @@ async function streamExplain(
   }
 }
 
+// ─── Rating button config ─────────────────────────────────────────────────────
+
+const RATING_CONFIG = [
+  { rating: 1 as Rating, label: "Nochmal", bg: "bg-rose-500/10 hover:bg-rose-500/20",   text: "text-rose-600 dark:text-rose-400",   border: "border-rose-500/20" },
+  { rating: 2 as Rating, label: "Schwer",  bg: "bg-amber-500/10 hover:bg-amber-500/20", text: "text-amber-600 dark:text-amber-400", border: "border-amber-500/20" },
+  { rating: 3 as Rating, label: "Gut",     bg: "bg-emerald-500/10 hover:bg-emerald-500/20", text: "text-emerald-600 dark:text-emerald-400", border: "border-emerald-500/20" },
+  { rating: 4 as Rating, label: "Leicht",  bg: "bg-blue-500/10 hover:bg-blue-500/20",   text: "text-blue-600 dark:text-blue-400",   border: "border-blue-500/20" },
+] as const;
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function StudyPage() {
   const params = useParams();
-  const id = params.id as string;
-  const deck = getDeckById(id);
+  const deckId = params.id as string;
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // Deck meta (title, emoji, category)
+  const deck = getAllDecks().find((d) => d.id === deckId) ?? null;
+
+  // ── Session queue ──────────────────────────────────────────────────────────
+  const [queue, setQueue]       = useState<QueueItem[]>([]);
+  const [pos, setPos]           = useState(0);
+  const [requeued, setRequeued] = useState<Set<string>>(new Set());
+  const [isDone, setIsDone]     = useState(false);
+  const [reviewed, setReviewed] = useState(0);
+  const [lapses, setLapses]     = useState(0);
+
+  const includeSubDecks = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("includeSubDecks") === "true"
+    : false;
+
+  const buildQueue = () => {
+    if (includeSubDecks) {
+      const subIds = getAllDecks().filter((d) => d.parentId === deckId).map((d) => d.id);
+      return getStudyQueueForDecks([deckId, ...subIds]);
+    }
+    return getStudyQueue(deckId);
+  };
+
+  useEffect(() => {
+    const q = buildQueue();
+    setQueue(q);
+    if (q.length === 0) setIsDone(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckId]);
+
+  const currentItem = queue[pos] ?? null;
+  const currentCard = currentItem?.card ?? null;
+  const currentSRS  = currentItem ? getSRSState(currentItem.deckId, currentItem.card.id) : null;
+  const deckSettings = getDeckSRSSettings(currentItem?.deckId ?? deckId);
+  const previews    = previewIntervals(currentSRS, deckSettings);
+
+  // ── UI state ───────────────────────────────────────────────────────────────
   const [isFlipped, setIsFlipped] = useState(false);
-  const [known, setKnown] = useState<string[]>([]);
-  const [learning, setLearning] = useState<string[]>([]);
-  const [isDone, setIsDone] = useState(false);
 
   // 20s auto-reveal
-  const [autoRevealSecs, setAutoRevealSecs] = useState(20);
+  const [autoRevealSecs, setAutoRevealSecs]     = useState(20);
   const [autoRevealActive, setAutoRevealActive] = useState(true);
   const revealTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -101,39 +145,39 @@ export default function StudyPage() {
   const [upcomingExam, setUpcomingExam] = useState<CalendarEvent | null>(null);
 
   // AI explanation
-  const [aiLevel, setAiLevel] = useState<Level | null>(null);
-  const [aiText, setAiText] = useState("");
+  const [aiLevel, setAiLevel]   = useState<Level | null>(null);
+  const [aiText, setAiText]     = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const aiAbortRef = useRef<AbortController | null>(null);
 
   // Chat
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
+  const [chatOpen, setChatOpen]       = useState(false);
+  const [chatInput, setChatInput]     = useState("");
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "ai"; text: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const chatAbortRef = useRef<AbortController | null>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatEndRef   = useRef<HTMLDivElement>(null);
 
   // Retro
   const [retroAdded, setRetroAdded] = useState(false);
 
-  // Load calendar events
+  // ── Load calendar events ───────────────────────────────────────────────────
   useEffect(() => {
     const raw = localStorage.getItem("synapze-calendar-events");
     if (!raw || !deck) return;
     const events: CalendarEvent[] = JSON.parse(raw);
-    const deckKeywords = deck.title.toLowerCase().split(" ");
+    const keywords = deck.title.toLowerCase().split(" ");
     const relevant = events
       .filter(e => {
         const diff = daysFromNow(e.date);
         if (diff < 0) return false;
-        return deckKeywords.some(kw => kw.length > 2 && e.title.toLowerCase().includes(kw));
+        return keywords.some(kw => kw.length > 2 && e.title.toLowerCase().includes(kw));
       })
       .sort((a, b) => a.date.localeCompare(b.date));
     setUpcomingExam(relevant[0] ?? null);
   }, [deck]);
 
-  // 20s countdown — resets on each new card
+  // ── 20s auto-reveal countdown ─────────────────────────────────────────────
   useEffect(() => {
     if (!autoRevealActive || isFlipped) {
       if (revealTimerRef.current) clearInterval(revealTimerRef.current);
@@ -151,39 +195,9 @@ export default function StudyPage() {
       });
     }, 1000);
     return () => { if (revealTimerRef.current) clearInterval(revealTimerRef.current); };
-  }, [currentIndex, autoRevealActive, isFlipped]);
+  }, [pos, autoRevealActive, isFlipped]);
 
-  // Keyboard shortcuts: Space = flip / Kann ich · 1 / Backspace / Delete = Nochmal
-  useEffect(() => {
-    if (isDone) return;
-    const handler = (e: KeyboardEvent) => {
-      // Don't fire when typing in an input/textarea
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-      const cardId = deck?.cards[currentIndex]?.id;
-      if (!cardId) return;
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        if (!isFlipped) {
-          setIsFlipped(true);
-        } else {
-          setKnown(p => [...p, cardId]);
-          advance();
-        }
-      }
-      if ((e.code === "Digit1" || e.key === "1" || e.key === "Backspace" || e.key === "Delete") && isFlipped) {
-        e.preventDefault();
-        setLearning(p => [...p, cardId]);
-        advance();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [isFlipped, isDone, currentIndex, deck]);
-
-  // Reset AI state when card changes
+  // ── Reset AI/chat on card change ───────────────────────────────────────────
   useEffect(() => {
     setAiLevel(null);
     setAiText("");
@@ -192,63 +206,84 @@ export default function StudyPage() {
     setChatMessages([]);
     setChatInput("");
     aiAbortRef.current?.abort();
-  }, [currentIndex]);
+  }, [pos]);
 
-  // Fetch AI explanation when level is selected
+  // ── Fetch AI explanation ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!aiLevel || !deck) return;
-    const card = deck.cards[currentIndex];
-    if (!card) return;
+    if (!aiLevel || !currentCard) return;
     aiAbortRef.current?.abort();
     const ctrl = new AbortController();
     aiAbortRef.current = ctrl;
     setAiText("");
     setAiLoading(true);
     streamExplain(
-      { front: card.front, back: card.back, level: aiLevel },
+      { front: currentCard.front, back: currentCard.back, level: aiLevel },
       chunk => setAiText(prev => prev + chunk),
       ctrl.signal,
     ).finally(() => setAiLoading(false));
-  }, [aiLevel, currentIndex]);
+  }, [aiLevel, pos]);
 
-  // Auto-scroll chat
+  // ── Auto-scroll chat ───────────────────────────────────────────────────────
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  if (!deck) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-20">
-        <p className="text-lg font-medium">Deck nicht gefunden.</p>
-        <Button asChild variant="outline"><Link href="/decks">Zurück zu Decks</Link></Button>
-      </div>
-    );
-  }
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isDone || !currentCard) return;
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!isFlipped) setIsFlipped(true);
+        else rate(3); // Space after flip = Good
+      }
+      if (isFlipped) {
+        if (e.key === "1") { e.preventDefault(); rate(1); }
+        if (e.key === "2") { e.preventDefault(); rate(2); }
+        if (e.key === "3") { e.preventDefault(); rate(3); }
+        if (e.key === "4") { e.preventDefault(); rate(4); }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isFlipped, isDone, pos, currentCard]);
 
-  const cards = deck.cards;
-  const currentCard = cards[currentIndex];
-  const handleFlip = () => setIsFlipped(f => !f);
+  // ── Core rating handler ────────────────────────────────────────────────────
+  const rate = useCallback((r: Rating) => {
+    if (!currentItem) return;
+    const { card, deckId: cardDeckId } = currentItem;
+    const prevSRS = getSRSState(cardDeckId, card.id);
+    const cardSettings = getDeckSRSSettings(cardDeckId);
+    const newSRS  = schedule(prevSRS, r, cardSettings);
+    setSRSState(cardDeckId, card.id, newSRS);
 
-  const handleKnow = () => { setKnown(p => [...p, currentCard.id]); advance(); };
-  const handleLearn = () => { setLearning(p => [...p, currentCard.id]); advance(); };
+    setReviewed(n => n + 1);
+    if (r === 1) setLapses(n => n + 1);
 
-  function advance() {
-    setIsFlipped(false);
-    if (currentIndex + 1 >= cards.length) {
-      setIsDone(true);
-    } else {
-      setTimeout(() => setCurrentIndex(i => i + 1), 150);
+    if (r === 1 && !requeued.has(card.id)) {
+      // Requeue once at the end of the session
+      setRequeued(s => new Set([...s, card.id]));
+      setQueue(q => [...q, { ...currentItem, srs: newSRS }]);
     }
-  }
 
-  function handleRestart() {
-    setCurrentIndex(0); setIsFlipped(false);
-    setKnown([]); setLearning([]); setIsDone(false); setRetroAdded(false);
-  }
+    setIsFlipped(false);
+    setTimeout(() => {
+      setPos(p => {
+        const next = p + 1;
+        if (next >= queue.length + (r === 1 && !requeued.has(card.id) ? 1 : 0)) {
+          setIsDone(true);
+          return p;
+        }
+        return next;
+      });
+    }, 150);
+  }, [currentItem, deckId, queue.length, requeued]);
 
+  // ── Chat ──────────────────────────────────────────────────────────────────
   async function sendChat() {
-    if (!chatInput.trim() || chatLoading || !deck) return;
-    const card = deck.cards[currentIndex];
+    if (!chatInput.trim() || chatLoading || !currentCard) return;
     const question = chatInput.trim();
     setChatInput("");
     setChatMessages(prev => [...prev, { role: "user", text: question }]);
@@ -258,7 +293,7 @@ export default function StudyPage() {
     setChatLoading(true);
     setChatMessages(prev => [...prev, { role: "ai", text: "" }]);
     await streamExplain(
-      { front: card.front, back: card.back, mode: "chat", userQuestion: question },
+      { front: currentCard.front, back: currentCard.back, mode: "chat", userQuestion: question },
       chunk => setChatMessages(prev => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
@@ -270,10 +305,35 @@ export default function StudyPage() {
     setChatLoading(false);
   }
 
-  // ── Auswertung (Results Screen) ────────────────────────────────────────────
+  // ── Not found ──────────────────────────────────────────────────────────────
+  if (!deck) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <p className="text-lg font-medium">Deck nicht gefunden.</p>
+        <Button asChild variant="outline"><Link href="/decks">Zurück zu Decks</Link></Button>
+      </div>
+    );
+  }
+
+  // ── Empty queue ────────────────────────────────────────────────────────────
+  if (isDone && reviewed === 0) {
+    return (
+      <div className="mx-auto flex max-w-lg flex-col items-center gap-6 py-20 text-center">
+        <div className="text-5xl">✅</div>
+        <h2 className="text-2xl font-bold">Keine fälligen Karten</h2>
+        <p className="text-muted-foreground">
+          {deck.emoji} {deck.title} — alle Karten sind für heute erledigt!
+        </p>
+        <Button asChild variant="outline">
+          <Link href="/dashboard">Zurück zum Dashboard</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  // ── Results screen ─────────────────────────────────────────────────────────
   if (isDone) {
-    const score = known.length;
-    const pct = Math.round((score / cards.length) * 100);
+    const pct = reviewed > 0 ? Math.round(((reviewed - lapses) / reviewed) * 100) : 0;
     return (
       <div className="mx-auto flex max-w-lg flex-col items-center gap-8 py-16 text-center">
         <div>
@@ -282,10 +342,9 @@ export default function StudyPage() {
           <p className="mt-1 text-muted-foreground">{deck.emoji} {deck.title}</p>
         </div>
 
-        {/* Score card */}
         <div className="w-full rounded-2xl border bg-card p-6 space-y-4">
           <p className="text-5xl font-bold text-primary tabular-nums">{pct}%</p>
-          <p className="text-muted-foreground">{score} von {cards.length} Karten gewusst</p>
+          <p className="text-muted-foreground">{reviewed - lapses} von {reviewed} Karten gewusst</p>
           <div className="h-3 overflow-hidden rounded-full bg-muted">
             <div
               className={cn(
@@ -295,14 +354,15 @@ export default function StudyPage() {
               style={{ width: `${pct}%` }}
             />
           </div>
-          <div className="flex justify-center gap-4 text-sm">
+          <div className="flex justify-center gap-3 text-sm flex-wrap">
             <div className="flex items-center gap-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 text-emerald-700 dark:text-emerald-400">
-              <CheckCircle2 className="h-4 w-4" />
-              <span className="font-bold">{known.length}</span>&nbsp;Kann ich!
+              <span className="font-bold">{reviewed - lapses}</span>&nbsp;Gewusst
             </div>
             <div className="flex items-center gap-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 px-4 py-3 text-rose-600 dark:text-rose-400">
-              <XCircle className="h-4 w-4" />
-              <span className="font-bold">{learning.length}</span>&nbsp;Nochmal
+              <span className="font-bold">{lapses}</span>&nbsp;Nochmal
+            </div>
+            <div className="flex items-center gap-1.5 rounded-xl bg-muted px-4 py-3 text-muted-foreground">
+              <span className="font-bold">{reviewed}</span>&nbsp;Gesamt
             </div>
           </div>
         </div>
@@ -320,7 +380,7 @@ export default function StudyPage() {
           </p>
           {retroAdded ? (
             <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="h-3.5 w-3.5" /> Zum Retro-Timetable hinzugefügt!
+              ✓ Zum Retro-Timetable hinzugefügt!
             </div>
           ) : (
             <button
@@ -333,7 +393,7 @@ export default function StudyPage() {
         </div>
 
         <div className="flex flex-wrap justify-center gap-3">
-          <Button onClick={handleRestart} variant="outline" size="lg">
+          <Button onClick={() => { setPos(0); setReviewed(0); setLapses(0); setIsDone(false); setRetroAdded(false); setQueue(buildQueue()); setRequeued(new Set()); }} variant="outline" size="lg">
             <RotateCcw className="mr-2 h-4 w-4" />Nochmal
           </Button>
           <Button asChild size="lg">
@@ -347,7 +407,15 @@ export default function StudyPage() {
     );
   }
 
-  // ── Study View ─────────────────────────────────────────────────────────────
+  if (!currentCard) return null;
+
+  // ── Queue stats for top bar ────────────────────────────────────────────────
+  const remaining = queue.length - pos;
+  const newCount  = queue.slice(pos).filter(i => !i.srs).length;
+  const revCount  = queue.slice(pos).filter(i => i.srs && i.srs.cardState === "review").length;
+  const lrnCount  = remaining - newCount - revCount;
+
+  // ── Study view ─────────────────────────────────────────────────────────────
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
 
@@ -375,57 +443,49 @@ export default function StudyPage() {
       })()}
 
       {/* Top Bar */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="sm">
           <Link href="/dashboard"><ArrowLeft className="mr-1 h-4 w-4" />Zurück</Link>
         </Button>
-        <div className="flex-1 text-center">
-          <p className="text-sm font-medium text-muted-foreground">{deck.emoji} {deck.title}</p>
+        <div className="flex-1 min-w-0">
+          <p className="truncate text-sm font-medium text-muted-foreground text-center">{deck.emoji} {deck.title}</p>
         </div>
         <button
           onClick={() => setAutoRevealActive(a => !a)}
           title="20s Auto-Aufdecken"
           className={cn(
-            "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
+            "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all shrink-0",
             autoRevealActive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
           )}
         >
           <Clock className="h-3.5 w-3.5" />
           {autoRevealActive && !isFlipped ? `${autoRevealSecs}s` : "20s"}
         </button>
-        <p className="text-sm font-semibold tabular-nums">{currentIndex + 1} / {cards.length}</p>
       </div>
 
-      {/* Quizlet-style progress */}
-      {(() => {
-        const answered = known.length + learning.length;
-        const pct = cards.length > 0 ? (answered / cards.length) * 100 : 0;
-        return (
-          <div className="flex items-center gap-3">
-            {/* Left: answered count */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white tabular-nums shadow-sm">
-              {answered}
-            </div>
-            {/* Bar */}
-            <div className="relative flex-1 h-2.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            {/* Right: total count */}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground tabular-nums">
-              {cards.length}
-            </div>
-          </div>
-        );
-      })()}
+      {/* Queue progress */}
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 shrink-0 items-center gap-2 rounded-full bg-muted px-3 text-xs font-medium">
+          {newCount > 0 && <span className="text-blue-500 font-bold">{newCount} Neu</span>}
+          {revCount > 0 && <span className="text-emerald-600 font-bold">{revCount} Wdh.</span>}
+          {lrnCount > 0 && <span className="text-amber-500 font-bold">{lrnCount} Lernen</span>}
+        </div>
+        <div className="flex-1 h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-all duration-500"
+            style={{ width: `${queue.length > 0 ? (pos / queue.length) * 100 : 0}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">
+          {pos + 1} / {queue.length}
+        </span>
+      </div>
 
       {/* Flashcard */}
       <div
         className="flip-card-container cursor-pointer"
         style={{ height: "280px" }}
-        onClick={handleFlip}
+        onClick={() => !isFlipped && setIsFlipped(true)}
       >
         <div className={`flip-card-inner ${isFlipped ? "flipped" : ""}`}>
           <div className="flip-card-face flip-card-front">
@@ -458,10 +518,9 @@ export default function StudyPage() {
         </div>
       </div>
 
-      {/* ── AI Erklärung Panel (visible after flip) ── */}
+      {/* AI Erklärung Panel */}
       {isFlipped && (
         <div className="overflow-hidden rounded-xl border border-violet-500/20 bg-violet-500/5">
-          {/* Header + Level buttons */}
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-violet-500" />
@@ -488,8 +547,6 @@ export default function StudyPage() {
               ))}
             </div>
           </div>
-
-          {/* Explanation text */}
           {(aiLevel || aiText) && (
             <div className="border-t border-violet-500/10 px-4 py-3">
               {aiLoading && !aiText ? (
@@ -499,15 +556,11 @@ export default function StudyPage() {
               ) : (
                 <p className="text-sm leading-relaxed text-foreground">
                   {aiText}
-                  {aiLoading && (
-                    <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-violet-500 align-middle" />
-                  )}
+                  {aiLoading && <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-violet-500 align-middle" />}
                 </p>
               )}
             </div>
           )}
-
-          {/* Chat toggle */}
           <div className="border-t border-violet-500/10">
             <button
               onClick={() => setChatOpen(o => !o)}
@@ -517,10 +570,8 @@ export default function StudyPage() {
               KI fragen…
               {chatOpen ? <ChevronUp className="ml-auto h-3.5 w-3.5" /> : <ChevronDown className="ml-auto h-3.5 w-3.5" />}
             </button>
-
             {chatOpen && (
               <div className="border-t border-violet-500/10 bg-background/50">
-                {/* Messages */}
                 <div className="max-h-48 overflow-y-auto space-y-2 px-4 py-3">
                   {chatMessages.length === 0 ? (
                     <p className="text-xs text-muted-foreground">Stelle eine Frage zu dieser Karte…</p>
@@ -530,9 +581,7 @@ export default function StudyPage() {
                         key={i}
                         className={cn(
                           "max-w-[85%] rounded-lg px-3 py-2 text-xs",
-                          msg.role === "user"
-                            ? "ml-auto bg-primary text-primary-foreground"
-                            : "bg-muted text-foreground",
+                          msg.role === "user" ? "ml-auto bg-primary text-primary-foreground" : "bg-muted text-foreground",
                         )}
                       >
                         {msg.text || (chatLoading && msg.role === "ai" ? "…" : "")}
@@ -541,7 +590,6 @@ export default function StudyPage() {
                   )}
                   <div ref={chatEndRef} />
                 </div>
-                {/* Input */}
                 <div className="flex items-center gap-2 border-t border-violet-500/10 px-3 py-2">
                   <input
                     value={chatInput}
@@ -564,32 +612,31 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* Action Buttons — icon only */}
+      {/* ── Rating buttons (4-point FSRS scale) ── */}
       <div
         className={cn(
-          "flex justify-center gap-5 transition-all duration-300",
-          isFlipped ? "opacity-100" : "opacity-40 pointer-events-none",
+          "grid grid-cols-4 gap-2 transition-all duration-300",
+          isFlipped ? "opacity-100" : "opacity-0 pointer-events-none",
         )}
       >
-        <button
-          onClick={handleLearn}
-          title="Kann ich nicht"
-          className="flex h-16 w-16 items-center justify-center rounded-full bg-rose-500 text-white shadow-md transition-all hover:bg-rose-600 hover:scale-105 active:scale-95"
-        >
-          <XCircle className="h-8 w-8" />
-        </button>
-        <button
-          onClick={handleKnow}
-          title="Kann ich!"
-          className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white shadow-md transition-all hover:bg-emerald-600 hover:scale-105 active:scale-95"
-        >
-          <CheckCircle2 className="h-8 w-8" />
-        </button>
+        {RATING_CONFIG.map(({ rating, label, bg, text, border }, i) => (
+          <button
+            key={rating}
+            onClick={() => rate(rating)}
+            className={cn(
+              "flex flex-col items-center rounded-xl border py-3 px-2 transition-all active:scale-95",
+              bg, text, border,
+            )}
+          >
+            <span className="text-sm font-semibold">{label}</span>
+            <span className="mt-0.5 text-[11px] opacity-60">{previews[i]}</span>
+          </button>
+        ))}
       </div>
 
       {!isFlipped && (
         <p className="text-center text-xs text-muted-foreground">
-          Drehe die Karte um, um die Antwort zu sehen
+          Tippe die Karte um · dann <kbd className="rounded border px-1 font-mono text-[10px]">1</kbd>–<kbd className="rounded border px-1 font-mono text-[10px]">4</kbd> oder <kbd className="rounded border px-1 font-mono text-[10px]">Leertaste</kbd>
         </p>
       )}
     </div>

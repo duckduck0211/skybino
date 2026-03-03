@@ -43,6 +43,7 @@ export interface Deck {
   cards: Card[];
   lastStudied?: string;
   masteredCount: number;
+  parentId?: string; // if set, this is a sub-deck
 }
 
 export const decks: Deck[] = [

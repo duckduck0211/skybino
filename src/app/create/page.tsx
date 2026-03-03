@@ -28,6 +28,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { CardType, OcclusionArea, Deck, Card as DeckCard } from "@/lib/data";
 import { getAllDecks, createUserDeck, addCardsToDeck } from "@/lib/store";
 
@@ -147,12 +162,32 @@ const noteTypes: { id: CardType; icon: React.ElementType; label: string; desc: s
   { id: "image-occlusion", icon: ImageIcon, label: "Bild-Okklusion", desc: "Bildbereiche verdecken", badge: "Neu" },
 ];
 
+// ─── Sortable wrapper ─────────────────────────────────────────────────────────
+
+function SortableCardWrapper({ id, children }: {
+  id: string;
+  children: (dragHandleProps: React.HTMLAttributes<HTMLElement>) => React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.45 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children({ ...attributes, ...listeners })}
+    </div>
+  );
+}
+
 // ─── Quizlet-style Basic Card Row ─────────────────────────────────────────────
 
 interface ImageResult { thumb: string; full: string; title: string }
 
-function BasicCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove }: {
-  card: BasicCard; onChange: (c: BasicCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean;
+function BasicCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove, dragHandleProps }: {
+  card: BasicCard; onChange: (c: BasicCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean; dragHandleProps?: React.HTMLAttributes<HTMLElement>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -220,7 +255,9 @@ function BasicCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove
           <TypeSwitcher currentType={card.reversed ? "basic-reversed" : "basic"} onTypeChange={onTypeChange} />
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
-          <GripHorizontal className="h-4 w-4 cursor-grab opacity-50 hover:opacity-100 transition-opacity" />
+          <span {...dragHandleProps} className="cursor-grab touch-none select-none">
+            <GripHorizontal className="h-4 w-4 opacity-50 hover:opacity-100 transition-opacity" />
+          </span>
           <button
             onClick={onRemove}
             disabled={!canRemove}
@@ -365,8 +402,8 @@ function BasicCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove
 
 // ─── Cloze Card Row ───────────────────────────────────────────────────────────
 
-function ClozeCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove }: {
-  card: ClozeCard; onChange: (c: ClozeCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean;
+function ClozeCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove, dragHandleProps }: {
+  card: ClozeCard; onChange: (c: ClozeCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean; dragHandleProps?: React.HTMLAttributes<HTMLElement>;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showPreview, setShowPreview] = useState(false);
@@ -404,7 +441,9 @@ function ClozeCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove
             {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             Vorschau
           </button>
-          <GripHorizontal className="h-4 w-4 cursor-grab opacity-50" />
+          <span {...dragHandleProps} className="cursor-grab touch-none select-none">
+            <GripHorizontal className="h-4 w-4 opacity-50 hover:opacity-100 transition-opacity" />
+          </span>
           <button onClick={onRemove} disabled={!canRemove} className="hover:text-destructive disabled:opacity-20">
             <Trash2 className="h-4 w-4" />
           </button>
@@ -445,8 +484,8 @@ function ClozeCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove
 
 // ─── Image Occlusion Card Row ─────────────────────────────────────────────────
 
-function ImageOcclusionCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove }: {
-  card: OccCard; onChange: (c: OccCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean;
+function ImageOcclusionCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove, dragHandleProps }: {
+  card: OccCard; onChange: (c: OccCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean; dragHandleProps?: React.HTMLAttributes<HTMLElement>;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -505,7 +544,9 @@ function ImageOcclusionCardRow({ card, onChange, onRemove, onTypeChange, index, 
           {card.areas.length > 0 && <Badge variant="secondary" className="text-xs">{card.areas.length} Bereich{card.areas.length !== 1 ? "e" : ""}</Badge>}
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
-          <GripHorizontal className="h-4 w-4 cursor-grab opacity-50" />
+          <span {...dragHandleProps} className="cursor-grab touch-none select-none">
+            <GripHorizontal className="h-4 w-4 opacity-50 hover:opacity-100 transition-opacity" />
+          </span>
           <button onClick={onRemove} disabled={!canRemove} className="hover:text-destructive disabled:opacity-20">
             <Trash2 className="h-4 w-4" />
           </button>
@@ -693,6 +734,18 @@ function CreatePageInner() {
 
   const removeCard = (id: string) => { if (cards.length <= 1) return; setCards((p) => p.filter((c) => c.id !== id)); };
 
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const reorderCards = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setCards((prev) => {
+        const oldIdx = prev.findIndex((c) => c.id === active.id);
+        const newIdx = prev.findIndex((c) => c.id === over.id);
+        return arrayMove(prev, oldIdx, newIdx);
+      });
+    }
+  };
+
   const switchCardType = useCallback((id: string, newType: DisplayType) => {
     setCards(prev => prev.map(c => {
       if (c.id !== id) return c;
@@ -824,29 +877,46 @@ function CreatePageInner() {
         </div>
       )}
 
-      {/* ── Mode switcher ── */}
-      <div className="flex gap-1 rounded-xl bg-muted p-1">
-        <button
-          onClick={() => setMode("new")}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-all",
-            mode === "new" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <FolderPlus className="h-4 w-4" />
-          Neues Deck
-        </button>
-        <button
-          onClick={() => setMode("add")}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-all",
-            mode === "add" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <FolderOpen className="h-4 w-4" />
-          Zu bestehendem Deck
-        </button>
-      </div>
+      {/* ── Mode switcher / Selected deck ── */}
+      {mode === "add" && selectedDeckId ? (
+        (() => {
+          const selectedDeck = allDecks.find((d) => d.id === selectedDeckId);
+          return (
+            <button
+              onClick={() => setSelectedDeckId(null)}
+              className="flex w-full items-center gap-2 rounded-xl border bg-background px-4 py-2.5 text-sm font-medium shadow-sm hover:bg-muted/40 transition-all"
+            >
+              <FolderOpen className="h-4 w-4 text-primary shrink-0" />
+              <span>{selectedDeck?.emoji}</span>
+              <span className="font-semibold truncate">{selectedDeck?.title}</span>
+              <span className="ml-auto text-xs text-muted-foreground shrink-0">ändern</span>
+            </button>
+          );
+        })()
+      ) : (
+        <div className="flex gap-1 rounded-xl bg-muted p-1">
+          <button
+            onClick={() => setMode("new")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-all",
+              mode === "new" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <FolderPlus className="h-4 w-4" />
+            Neues Deck
+          </button>
+          <button
+            onClick={() => setMode("add")}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-all",
+              mode === "add" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <FolderOpen className="h-4 w-4" />
+            Zu bestehendem Deck
+          </button>
+        </div>
+      )}
 
       {/* ── NEW: Deck title + meta (collapsed, minimal) ── */}
       {mode === "new" && (
@@ -885,7 +955,7 @@ function CreatePageInner() {
       )}
 
       {/* ── ADD: Deck Picker ── */}
-      {mode === "add" && (
+      {mode === "add" && !selectedDeckId && (
         <div className="rounded-2xl border bg-card p-5">
           {allDecks.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
@@ -919,56 +989,64 @@ function CreatePageInner() {
 
 
       {/* ── Cards ── */}
-      <div className="space-y-3">
-        {cards.map((card, i) => {
-          if (card.type === "basic")
-            return (
-              <BasicCardRow
-                key={card.id}
-                card={card as BasicCard}
-                index={i}
-                canRemove={cards.length > 1}
-                onChange={(c) => updateCard(c)}
-                onRemove={() => removeCard(card.id)}
-                onTypeChange={(t) => switchCardType(card.id, t)}
-              />
-            );
-          if (card.type === "cloze")
-            return (
-              <ClozeCardRow
-                key={card.id}
-                card={card as ClozeCard}
-                index={i}
-                canRemove={cards.length > 1}
-                onChange={(c) => updateCard(c)}
-                onRemove={() => removeCard(card.id)}
-                onTypeChange={(t) => switchCardType(card.id, t)}
-              />
-            );
-          if (card.type === "image-occlusion")
-            return (
-              <ImageOcclusionCardRow
-                key={card.id}
-                card={card as OccCard}
-                index={i}
-                canRemove={cards.length > 1}
-                onChange={(c) => updateCard(c)}
-                onRemove={() => removeCard(card.id)}
-                onTypeChange={(t) => switchCardType(card.id, t)}
-              />
-            );
-          return null;
-        })}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderCards}>
+        <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+          <div className="space-y-3">
+            {cards.map((card, i) => (
+              <SortableCardWrapper key={card.id} id={card.id}>
+                {(dragHandleProps) => {
+                  if (card.type === "basic")
+                    return (
+                      <BasicCardRow
+                        card={card as BasicCard}
+                        index={i}
+                        canRemove={cards.length > 1}
+                        onChange={(c) => updateCard(c)}
+                        onRemove={() => removeCard(card.id)}
+                        onTypeChange={(t) => switchCardType(card.id, t)}
+                        dragHandleProps={dragHandleProps}
+                      />
+                    );
+                  if (card.type === "cloze")
+                    return (
+                      <ClozeCardRow
+                        card={card as ClozeCard}
+                        index={i}
+                        canRemove={cards.length > 1}
+                        onChange={(c) => updateCard(c)}
+                        onRemove={() => removeCard(card.id)}
+                        onTypeChange={(t) => switchCardType(card.id, t)}
+                        dragHandleProps={dragHandleProps}
+                      />
+                    );
+                  if (card.type === "image-occlusion")
+                    return (
+                      <ImageOcclusionCardRow
+                        card={card as OccCard}
+                        index={i}
+                        canRemove={cards.length > 1}
+                        onChange={(c) => updateCard(c)}
+                        onRemove={() => removeCard(card.id)}
+                        onTypeChange={(t) => switchCardType(card.id, t)}
+                        dragHandleProps={dragHandleProps}
+                      />
+                    );
+                  return null;
+                }}
+              </SortableCardWrapper>
+            ))}
 
-        {/* Add card */}
-        <button
-          onClick={addCard}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-muted py-5 text-sm font-medium text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
-        >
-          <Plus className="h-4 w-4" />
-          Karte hinzufügen
-        </button>
-      </div>
+            {/* Add card */}
+            <button
+              onClick={addCard}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-muted py-5 text-sm font-medium text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+            >
+              <Plus className="h-4 w-4" />
+              Karte hinzufügen
+            </button>
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {/* ── Bottom save ── */}
       <div className="flex items-center justify-between rounded-2xl border bg-muted/30 px-5 py-4">

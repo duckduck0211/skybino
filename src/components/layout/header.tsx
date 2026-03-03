@@ -23,9 +23,12 @@ import {
   FolderPlus,
   PlusCircle,
   Wrench,
+  CloudUpload,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { createBackup } from "@/lib/store";
 
 const navItems = [
   { href: "/",          icon: Compass,   label: "Entdecken"  },
@@ -115,6 +118,14 @@ export function Header() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
+
+  const [syncDone, setSyncDone] = useState(false);
+
+  const handleSync = () => {
+    createBackup();
+    setSyncDone(true);
+    setTimeout(() => setSyncDone(false), 2000);
+  };
 
   const initials = profileName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() || "MB";
   const handleTheme = (t: Theme) => { setTheme(t); applyThemeToDOM(t); };
@@ -248,6 +259,18 @@ export function Header() {
       </div>
 
       <div className="flex-1" />
+
+      {/* ── Sync / Backup ── */}
+      <button
+        title="Synchronisieren"
+        onClick={handleSync}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+      >
+        {syncDone
+          ? <Check className="h-[18px] w-[18px] text-green-500" strokeWidth={2} />
+          : <CloudUpload className="h-[18px] w-[18px]" strokeWidth={1.75} />
+        }
+      </button>
 
       {/* ── Pomodoro ── */}
       <button

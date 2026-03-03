@@ -8,7 +8,8 @@ import {
   ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getDeckById, Card } from "@/lib/data";
+import { Card } from "@/lib/data";
+import { getAllDecks } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ function generateQuestions(cards: Card[]): QuizQuestion[] {
 export default function QuizPage() {
   const params = useParams();
   const id = params.id as string;
-  const deck = getDeckById(id);
+  const [deck, setDeck] = useState(() => getAllDecks().find((d) => d.id === id) ?? null);
 
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -69,12 +70,19 @@ export default function QuizPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
-    if (deck) {
-      const qs = generateQuestions(deck.cards);
-      setQuestions(qs);
-      setAnswers(new Array(qs.length).fill(null));
+    const allDecks = getAllDecks();
+    const foundDeck = allDecks.find((d) => d.id === id) ?? null;
+    setDeck(foundDeck);
+    if (!foundDeck) return;
+    const includeSubDecks = new URLSearchParams(window.location.search).get("includeSubDecks") === "true";
+    let allCards = [...foundDeck.cards];
+    if (includeSubDecks) {
+      allDecks.filter((d) => d.parentId === id).forEach((sub) => { allCards = [...allCards, ...sub.cards]; });
     }
-  }, [deck]);
+    const qs = generateQuestions(allCards);
+    setQuestions(qs);
+    setAnswers(new Array(qs.length).fill(null));
+  }, [id]);
 
   if (!deck) {
     return (

@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle2, BookOpen, GraduationCap, MapPin, Calendar, Award, ChevronRight, Zap } from "lucide-react";
+import { CheckCircle2, BookOpen, GraduationCap, MapPin, Calendar, Award, ChevronRight, Zap, Trash2, RotateCcw, CloudUpload } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { decks, getTotalCards, getTotalMastered } from "@/lib/data";
+import { getAllDecks, getBackups, deleteBackup, restoreBackup, createBackup } from "@/lib/store";
+import type { Backup } from "@/lib/store";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -96,11 +97,34 @@ export default function ProfilePage() {
     setTimeout(() => setSaved(false), 3000);
   };
 
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [restoreConfirm, setRestoreConfirm] = useState<string | null>(null);
+
+  useEffect(() => { setBackups(getBackups()); }, []);
+
+  const refreshBackups = () => setBackups(getBackups());
+
+  const handleDeleteBackup = (id: string) => {
+    deleteBackup(id);
+    refreshBackups();
+  };
+
+  const handleRestore = (id: string) => {
+    restoreBackup(id);
+    setRestoreConfirm(null);
+    window.location.reload();
+  };
+
+  const handleManualSync = () => {
+    createBackup("Manuelle Sicherung");
+    refreshBackups();
+  };
+
   const set = (field: keyof UserProfile, value: string) =>
     setProfile(p => ({ ...p, [field]: value }));
 
-  const totalCards = getTotalCards();
-  const totalMastered = getTotalMastered();
+  const allDecks = getAllDecks();
+  const totalCards = allDecks.reduce((s, d) => s + d.cards.length, 0);
 
   // Find curriculum data for current school year
   const schuljahrLabel = schuljahre.find(s => s.value === profile.schuljahr)?.label ?? "";
@@ -155,7 +179,7 @@ export default function ProfilePage() {
           {/* Stats row */}
           <div className="mt-5 grid grid-cols-3 gap-3">
             <div className="rounded-xl bg-muted/50 p-3 text-center">
-              <p className="text-2xl font-bold text-primary">{decks.length}</p>
+              <p className="text-2xl font-bold text-primary">{allDecks.length}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Decks</p>
             </div>
             <div className="rounded-xl bg-muted/50 p-3 text-center">
@@ -317,35 +341,59 @@ export default function ProfilePage() {
         </Card>
       )}
 
-      {/* ── Learning Progress ── */}
+      {/* ── Sicherungskopien ── */}
       <Card>
         <CardContent className="p-6">
-          <h3 className="mb-4 font-bold text-lg">Lernfortschritt</h3>
-          <div className="space-y-3">
-            {decks.map(deck => (
-              <div key={deck.id} className="flex items-center gap-3">
-                <span className="text-lg">{deck.emoji}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between mb-1">
-                    <p className="text-sm font-medium truncate">{deck.title}</p>
-                    <p className="text-xs text-muted-foreground shrink-0 ml-2">
-                      {deck.masteredCount}/{deck.cards.length}
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-lg">Sicherungskopien</h3>
+            <button
+              onClick={handleManualSync}
+              className="flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+            >
+              <CloudUpload className="h-3.5 w-3.5" />
+              Jetzt sichern
+            </button>
+          </div>
+
+          {backups.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
+              <CloudUpload className="h-8 w-8 opacity-30" />
+              <p className="text-sm">Noch keine Sicherungskopien vorhanden.</p>
+              <p className="text-xs opacity-60">Klicke auf das Sync-Symbol oben oder &ldquo;Jetzt sichern&rdquo;.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {backups.map((b) => (
+                <div key={b.id} className="flex items-center gap-3 rounded-xl border px-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{b.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(b.createdAt).toLocaleString("de-DE")}
                     </p>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-1.5 rounded-full ${deck.color} transition-all`}
-                      style={{ width: `${(deck.masteredCount / deck.cards.length) * 100}%` }}
-                    />
-                  </div>
+                  {restoreConfirm === b.id ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button onClick={() => handleRestore(b.id)} className="rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
+                        Wiederherstellen
+                      </button>
+                      <button onClick={() => setRestoreConfirm(null)} className="rounded-lg border px-2 py-1 text-xs hover:bg-muted transition-colors">
+                        Abbrechen
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => setRestoreConfirm(b.id)} title="Wiederherstellen" className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => handleDeleteBackup(b.id)} title="Löschen" className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-4 flex justify-between rounded-xl bg-muted/50 px-4 py-3 text-sm">
-            <span className="text-muted-foreground">Insgesamt gemeistert</span>
-            <span className="font-bold">{totalMastered} / {totalCards} Karten</span>
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
