@@ -21,6 +21,9 @@ import {
   Lock,
   Sparkles,
   Upload,
+  Repeat2,
+  ChevronDown,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +33,9 @@ import { getAllDecks, createUserDeck, addCardsToDeck } from "@/lib/store";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface BasicCard { id: string; type: "basic"; front: string; back: string; image?: string }
+type DisplayType = "basic" | "basic-reversed" | "cloze" | "image-occlusion";
+
+interface BasicCard { id: string; type: "basic"; front: string; back: string; image?: string; reversed?: boolean }
 interface ClozeCard  { id: string; type: "cloze";  text: string }
 interface OccCard    { id: string; type: "image-occlusion"; imageUrl: string; areas: OcclusionArea[] }
 type AnyCard = BasicCard | ClozeCard | OccCard;
@@ -52,17 +57,86 @@ function clozePreview(text: string) {
   );
 }
 
-function convertToStoredCard(c: AnyCard, index: number): DeckCard {
+function convertToStoredCards(c: AnyCard, index: number): DeckCard[] {
   const id = `${Date.now()}_${index}`;
   if (c.type === "basic") {
     const b = c as BasicCard;
-    return { id, type: "basic", front: b.front, back: b.back, status: "new" };
+    const forward: DeckCard = { id, type: "basic", front: b.front, back: b.back, backImageUrl: b.image, status: "new" };
+    if (b.reversed) {
+      const backward: DeckCard = { id: `${id}_r`, type: "basic", front: b.back, back: b.front, backImageUrl: b.image, status: "new" };
+      return [forward, backward];
+    }
+    return [forward];
   }
   if (c.type === "cloze") {
-    return { id, type: "cloze", front: (c as ClozeCard).text, back: "", status: "new" };
+    return [{ id, type: "cloze", front: (c as ClozeCard).text, back: "", status: "new" }];
   }
   const o = c as OccCard;
-  return { id, type: "image-occlusion", front: "", back: "", imageUrl: o.imageUrl, occlusionAreas: o.areas, status: "new" };
+  return [{ id, type: "image-occlusion", front: "", back: "", imageUrl: o.imageUrl, occlusionAreas: o.areas, status: "new" }];
+}
+
+// ─── Type Switcher ────────────────────────────────────────────────────────────
+
+const TYPE_OPTIONS: { id: DisplayType; icon: React.ElementType; label: string; color: string }[] = [
+  { id: "basic",           icon: AlignLeft, label: "Einfach",            color: "text-violet-500" },
+  { id: "basic-reversed",  icon: Repeat2,   label: "Einfach & Rückwärts", color: "text-blue-500"   },
+  { id: "cloze",           icon: Type,      label: "Lückentext",         color: "text-amber-500"  },
+  { id: "image-occlusion", icon: ImageIcon, label: "Bild-Okklusion",     color: "text-emerald-500"},
+];
+
+function TypeSwitcher({ currentType, onTypeChange }: {
+  currentType: DisplayType;
+  onTypeChange: (t: DisplayType) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const current = TYPE_OPTIONS.find(t => t.id === currentType)!;
+  const Icon = current.icon;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Kartentyp ändern"
+        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <Icon className={cn("h-3.5 w-3.5", current.color)} />
+        <span>{current.label}</span>
+        <ChevronDown className="h-3 w-3 opacity-50" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl border bg-popover p-1 shadow-xl">
+          {TYPE_OPTIONS.map(({ id, icon: OptionIcon, label, color }) => (
+            <button
+              key={id}
+              onClick={() => { onTypeChange(id); setOpen(false); }}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors hover:bg-accent",
+                id === currentType && "bg-accent text-foreground",
+              )}
+            >
+              <OptionIcon className={cn("h-3.5 w-3.5 shrink-0", color)} />
+              {label}
+              {id === "basic-reversed" && (
+                <span className="ml-auto text-[10px] text-muted-foreground opacity-70">Reverse</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const categories = ["Medizin", "Informatik", "Sprachen", "Geschichte", "Mathematik", "Biologie", "Andere"];
@@ -75,51 +149,76 @@ const noteTypes: { id: CardType; icon: React.ElementType; label: string; desc: s
 
 // ─── Quizlet-style Basic Card Row ─────────────────────────────────────────────
 
-function BasicCardRow({ card, onChange, onRemove, index, canRemove }: {
-  card: BasicCard; onChange: (c: BasicCard) => void; onRemove: () => void; index: number; canRemove: boolean;
+interface ImageResult { thumb: string; full: string; title: string }
+
+function BasicCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove }: {
+  card: BasicCard; onChange: (c: BasicCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const imgZoneRef = useRef<HTMLDivElement>(null);
-  const [pasteActive, setPasteActive] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ImageResult[]>([]);
+  const [searching, setSearching] = useState(false);
 
-  // Read image from clipboard item
-  const readClipboardImage = useCallback((item: DataTransferItem) => {
-    const blob = item.getAsFile();
-    if (!blob) return;
-    const reader = new FileReader();
-    reader.onload = (e) => onChange({ ...card, image: e.target?.result as string });
-    reader.readAsDataURL(blob);
-  }, [card, onChange]);
+  // Prefill search query when picker opens
+  const openPicker = () => {
+    setSearchQuery(card.front || "");
+    setSearchResults([]);
+    setPickerOpen(true);
+  };
 
-  // Global paste listener when this card's image zone is active
+  // Search Wikimedia Commons images
+  const runSearch = useCallback(async (q: string) => {
+    if (!q.trim()) return;
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/images?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setSearchResults(data.images ?? []);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }, []);
+
+  // Auto-search when picker opens with a term
   useEffect(() => {
-    if (!pasteActive) return;
-    const handler = (e: ClipboardEvent) => {
-      const items = Array.from(e.clipboardData?.items ?? []);
-      const imgItem = items.find((i) => i.type.startsWith("image/"));
-      if (imgItem) { e.preventDefault(); readClipboardImage(imgItem); setPasteActive(false); }
-    };
-    const blur = () => setPasteActive(false);
-    document.addEventListener("paste", handler);
-    window.addEventListener("blur", blur);
-    return () => { document.removeEventListener("paste", handler); window.removeEventListener("blur", blur); };
-  }, [pasteActive, readClipboardImage]);
+    if (pickerOpen && searchQuery) runSearch(searchQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerOpen]);
 
   // File input change
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => onChange({ ...card, image: ev.target?.result as string });
+    reader.onload = (ev) => {
+      onChange({ ...card, image: ev.target?.result as string });
+      setPickerOpen(false);
+    };
     reader.readAsDataURL(file);
     e.target.value = "";
+  };
+
+  const selectResult = (img: ImageResult) => {
+    onChange({ ...card, image: img.full });
+    setPickerOpen(false);
+  };
+
+  const removeImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange({ ...card, image: undefined });
   };
 
   return (
     <div className="rounded-2xl border bg-card shadow-sm transition-shadow hover:shadow-md">
       {/* Top bar */}
       <div className="flex items-center justify-between border-b px-5 py-3">
-        <span className="text-sm font-bold">{index + 1}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold">{index + 1}</span>
+          <TypeSwitcher currentType={card.reversed ? "basic-reversed" : "basic"} onTypeChange={onTypeChange} />
+        </div>
         <div className="flex items-center gap-3 text-muted-foreground">
           <GripHorizontal className="h-4 w-4 cursor-grab opacity-50 hover:opacity-100 transition-opacity" />
           <button
@@ -160,53 +259,114 @@ function BasicCardRow({ card, onChange, onRemove, index, canRemove }: {
           </label>
         </div>
 
-        {/* Bild */}
-        <div ref={imgZoneRef} className="relative flex h-[60px] w-[60px] shrink-0 items-center justify-center">
+        {/* Bild-Thumbnail */}
+        <div className="relative flex h-[60px] w-[60px] shrink-0 items-center justify-center">
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
 
           {card.image ? (
-            // Thumbnail preview — click to replace, X to remove
-            <div className="relative h-full w-full group cursor-pointer" onClick={() => fileInputRef.current?.click()} title="Klicken zum Ersetzen">
+            <div className="group relative h-full w-full cursor-pointer" onClick={openPicker} title="Klicken zum Ändern">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={card.image} alt="Bild" className="h-full w-full rounded-xl object-cover" />
-              {/* Hover overlay */}
               <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
                 <ImageIcon className="h-4 w-4 text-white" />
               </div>
-              {/* Remove button */}
               <button
-                onClick={(e) => { e.stopPropagation(); onChange({ ...card, image: undefined }); }}
-                className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-white shadow"
+                onClick={removeImage}
+                title="Bild entfernen"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-white shadow hover:scale-110 transition-transform"
               >
-                <X className="h-2.5 w-2.5" />
+                <Trash2 className="h-3 w-3" />
               </button>
             </div>
           ) : (
-            // Empty — click = Datei-Dialog · ⌘V = Zwischenablage
             <button
-              title="Klicken zum Hochladen · ⌘V zum Einfügen"
-              onClick={() => { setPasteActive(true); fileInputRef.current?.click(); }}
-              className={cn(
-                "flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed transition-all",
-                pasteActive
-                  ? "border-primary text-primary animate-pulse"
-                  : "border-muted text-muted-foreground hover:border-primary/40 hover:text-primary"
-              )}
+              title="Bild hinzufügen"
+              onClick={openPicker}
+              className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-muted text-muted-foreground transition-all hover:border-primary/40 hover:text-primary"
             >
               <ImageIcon className="h-5 w-5" />
-              <span className="text-[10px] font-medium">{pasteActive ? "⌘V" : "Bild"}</span>
+              <span className="text-[10px] font-medium">Bild</span>
             </button>
           )}
         </div>
       </div>
+
+      {/* ── Image Picker Panel ── */}
+      {pickerOpen && (
+        <div className="border-t bg-muted/30 px-5 pb-5 pt-4">
+          {/* Search row */}
+          <div className="flex items-center gap-2 mb-4">
+            <div className="flex flex-1 items-center gap-2 rounded-xl border bg-background px-3 py-2 focus-within:border-primary transition-colors">
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") runSearch(searchQuery); }}
+                placeholder="Bild suchen…"
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+              <button
+                onClick={() => runSearch(searchQuery)}
+                className="text-[11px] font-semibold text-primary hover:underline"
+              >
+                Suchen
+              </button>
+            </div>
+            <span className="text-xs text-muted-foreground">oder</span>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-xl border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-accent transition-colors"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Hochladen
+            </button>
+          </div>
+
+          {/* Results grid */}
+          {searching ? (
+            <div className="flex h-24 items-center justify-center text-sm text-muted-foreground animate-pulse">
+              Suche läuft…
+            </div>
+          ) : searchResults.length > 0 ? (
+            <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1">
+              {searchResults.map((img, i) => (
+                <button
+                  key={i}
+                  onClick={() => selectResult(img)}
+                  title={img.title}
+                  className="group relative aspect-square overflow-hidden rounded-xl border-2 border-transparent bg-muted transition-all hover:border-primary hover:shadow-md"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img.thumb} alt={img.title} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                </button>
+              ))}
+            </div>
+          ) : searchResults !== null && !searching ? (
+            <div className="flex h-20 items-center justify-center rounded-xl bg-muted/50 text-xs text-muted-foreground">
+              Suche nach einem Begriff, um Bilder zu finden
+            </div>
+          ) : null}
+
+          {/* Close */}
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => setPickerOpen(false)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              ↑ Schließen
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Cloze Card Row ───────────────────────────────────────────────────────────
 
-function ClozeCardRow({ card, onChange, onRemove, index, canRemove }: {
-  card: ClozeCard; onChange: (c: ClozeCard) => void; onRemove: () => void; index: number; canRemove: boolean;
+function ClozeCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove }: {
+  card: ClozeCard; onChange: (c: ClozeCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showPreview, setShowPreview] = useState(false);
@@ -234,9 +394,9 @@ function ClozeCardRow({ card, onChange, onRemove, index, canRemove }: {
   return (
     <div className="rounded-2xl border bg-card shadow-sm">
       <div className="flex items-center justify-between border-b px-5 py-3">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className="text-sm font-bold">{index + 1}</span>
-          <Badge variant="secondary" className="text-xs">Lückentext</Badge>
+          <TypeSwitcher currentType="cloze" onTypeChange={onTypeChange} />
           {count > 0 && <Badge variant="secondary" className="text-xs">{count} Lücke{count !== 1 ? "n" : ""}</Badge>}
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
@@ -285,8 +445,8 @@ function ClozeCardRow({ card, onChange, onRemove, index, canRemove }: {
 
 // ─── Image Occlusion Card Row ─────────────────────────────────────────────────
 
-function ImageOcclusionCardRow({ card, onChange, onRemove, index, canRemove }: {
-  card: OccCard; onChange: (c: OccCard) => void; onRemove: () => void; index: number; canRemove: boolean;
+function ImageOcclusionCardRow({ card, onChange, onRemove, onTypeChange, index, canRemove }: {
+  card: OccCard; onChange: (c: OccCard) => void; onRemove: () => void; onTypeChange: (t: DisplayType) => void; index: number; canRemove: boolean;
 }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -339,9 +499,9 @@ function ImageOcclusionCardRow({ card, onChange, onRemove, index, canRemove }: {
   return (
     <div className="rounded-2xl border bg-card shadow-sm">
       <div className="flex items-center justify-between border-b px-5 py-3">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className="text-sm font-bold">{index + 1}</span>
-          <Badge variant="secondary" className="text-xs">Bild-Okklusion</Badge>
+          <TypeSwitcher currentType="image-occlusion" onTypeChange={onTypeChange} />
           {card.areas.length > 0 && <Badge variant="secondary" className="text-xs">{card.areas.length} Bereich{card.areas.length !== 1 ? "e" : ""}</Badge>}
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
@@ -420,7 +580,7 @@ function SmartAssistPanel({ onClose }: { onClose: () => void }) {
       <div className="flex items-center justify-between border-b px-5 py-3.5">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-violet-500" />
-          <span className="text-sm font-semibold">Smart Assist</span>
+          <span className="text-sm font-semibold">KI-Assistent</span>
           <Badge className="text-[10px] px-1.5 py-0">Beta</Badge>
         </div>
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -531,7 +691,17 @@ function CreatePageInner() {
       setCards((p) => [...p, { id, type: "image-occlusion", imageUrl: "", areas: [] }]);
   };
 
-  const removeCard  = (id: string) => { if (cards.length <= 1) return; setCards((p) => p.filter((c) => c.id !== id)); };
+  const removeCard = (id: string) => { if (cards.length <= 1) return; setCards((p) => p.filter((c) => c.id !== id)); };
+
+  const switchCardType = useCallback((id: string, newType: DisplayType) => {
+    setCards(prev => prev.map(c => {
+      if (c.id !== id) return c;
+      if (newType === "basic")          return { id, type: "basic" as const, front: "", back: "" };
+      if (newType === "basic-reversed") return { id, type: "basic" as const, front: (c as BasicCard).front ?? "", back: (c as BasicCard).back ?? "", reversed: true };
+      if (newType === "cloze")          return { id, type: "cloze" as const, text: "" };
+      return { id, type: "image-occlusion" as const, imageUrl: "", areas: [] };
+    }));
+  }, []);;
   const updateCard  = useCallback((updated: AnyCard) => { setCards((p) => p.map((c) => (c.id === updated.id ? updated : c))); }, []);
 
   const filledCards = cards.filter((c) => {
@@ -548,7 +718,7 @@ function CreatePageInner() {
   // ── Save ──
   const doSave = (): string | null => {
     if (!isValid) return null;
-    const convertedCards: DeckCard[] = filledCards.map(convertToStoredCard);
+    const convertedCards: DeckCard[] = filledCards.flatMap(convertToStoredCards);
 
     if (mode === "new") {
       const newId = `user-${Date.now()}`;
@@ -609,6 +779,19 @@ function CreatePageInner() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => setSmartAssistOpen((p) => !p)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-medium transition-all",
+              smartAssistOpen
+                ? "border-violet-400 bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            KI-Assistent
+            <Badge className="text-[9px] px-1 py-px ml-0.5">Beta</Badge>
+          </button>
           <Button
             variant="outline"
             onClick={handleSave}
@@ -734,69 +917,6 @@ function CreatePageInner() {
         </div>
       )}
 
-      {/* ── Toolbar ── */}
-      <div className="flex items-center gap-2">
-        {/* Card type selector */}
-        <div className="flex items-center rounded-xl border bg-muted/40 p-1 gap-0.5">
-          {noteTypes.map((nt) => {
-            const Icon = nt.icon;
-            const isActive = activeNoteType === nt.id;
-            return (
-              <button
-                key={nt.id}
-                onClick={() => setActiveNoteType(nt.id)}
-                title={nt.label}
-                className={cn(
-                  "relative flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all",
-                  isActive ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {nt.label}
-                {nt.badge && (
-                  <span className="absolute -right-1 -top-1 rounded-full bg-primary px-1 py-px text-[9px] font-bold text-primary-foreground">
-                    {nt.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex-1" />
-
-        {/* Import (placeholder) */}
-        <button className="flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-          <Plus className="h-3.5 w-3.5" />
-          Importieren
-        </button>
-
-        {/* Schaubild (locked) */}
-        <button
-          disabled
-          className="flex cursor-not-allowed items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium text-muted-foreground opacity-60"
-          title="Premium-Funktion"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Schaubild
-          <Lock className="h-3 w-3 text-amber-500" />
-        </button>
-
-        {/* Smart Assist toggle */}
-        <button
-          onClick={() => setSmartAssistOpen((p) => !p)}
-          className={cn(
-            "flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all",
-            smartAssistOpen
-              ? "border-violet-400 bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          Smart Assist
-          <Badge className="text-[9px] px-1 py-px ml-0.5">Beta</Badge>
-        </button>
-      </div>
 
       {/* ── Cards ── */}
       <div className="space-y-3">
@@ -810,6 +930,7 @@ function CreatePageInner() {
                 canRemove={cards.length > 1}
                 onChange={(c) => updateCard(c)}
                 onRemove={() => removeCard(card.id)}
+                onTypeChange={(t) => switchCardType(card.id, t)}
               />
             );
           if (card.type === "cloze")
@@ -821,6 +942,7 @@ function CreatePageInner() {
                 canRemove={cards.length > 1}
                 onChange={(c) => updateCard(c)}
                 onRemove={() => removeCard(card.id)}
+                onTypeChange={(t) => switchCardType(card.id, t)}
               />
             );
           if (card.type === "image-occlusion")
@@ -832,6 +954,7 @@ function CreatePageInner() {
                 canRemove={cards.length > 1}
                 onChange={(c) => updateCard(c)}
                 onRemove={() => removeCard(card.id)}
+                onTypeChange={(t) => switchCardType(card.id, t)}
               />
             );
           return null;

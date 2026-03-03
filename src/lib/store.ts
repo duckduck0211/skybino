@@ -74,6 +74,89 @@ export function getAllDecks(): Deck[] {
   return [...augmentedMock, ...getUserDecks()];
 }
 
+// ─── Delete / Rename user decks ───────────────────────────────────────────────
+
+export function deleteUserDeck(deckId: string): void {
+  saveUserDecks(getUserDecks().filter((d) => d.id !== deckId));
+}
+
+export function renameUserDeck(deckId: string, newTitle: string, newEmoji: string): void {
+  const list = getUserDecks();
+  const idx = list.findIndex((d) => d.id === deckId);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], title: newTitle, emoji: newEmoji };
+  saveUserDecks(list);
+}
+
+// ─── Folders & Documents ──────────────────────────────────────────────────────
+
+export interface FolderDoc {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+  dataUrl: string;
+}
+
+export interface UserFolder {
+  id: string;
+  name: string;
+  emoji: string;
+  createdAt: string;
+  documents: FolderDoc[];
+}
+
+const FOLDERS_KEY = "synapze-folders";
+
+function getFolderList(): UserFolder[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(FOLDERS_KEY);
+    return raw ? (JSON.parse(raw) as UserFolder[]) : [];
+  } catch { return []; }
+}
+
+function saveFolderList(list: UserFolder[]): void {
+  localStorage.setItem(FOLDERS_KEY, JSON.stringify(list));
+}
+
+export function getFolders(): UserFolder[] { return getFolderList(); }
+
+export function createUserFolder(folder: UserFolder): void {
+  const list = getFolderList();
+  list.push(folder);
+  saveFolderList(list);
+}
+
+export function deleteUserFolder(folderId: string): void {
+  saveFolderList(getFolderList().filter((f) => f.id !== folderId));
+}
+
+export function renameUserFolder(folderId: string, name: string, emoji: string): void {
+  const list = getFolderList();
+  const idx = list.findIndex((f) => f.id === folderId);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], name, emoji };
+  saveFolderList(list);
+}
+
+export function addDocToFolder(folderId: string, doc: FolderDoc): void {
+  const list = getFolderList();
+  const idx = list.findIndex((f) => f.id === folderId);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], documents: [...list[idx].documents, doc] };
+  saveFolderList(list);
+}
+
+export function deleteDocFromFolder(folderId: string, docId: string): void {
+  const list = getFolderList();
+  const idx = list.findIndex((f) => f.id === folderId);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], documents: list[idx].documents.filter((d) => d.id !== docId) };
+  saveFolderList(list);
+}
+
 // ─── Flat card list (re-exported helper) ─────────────────────────────────────
 
 export function getAllCardsFromStore() {

@@ -153,6 +153,36 @@ export default function StudyPage() {
     return () => { if (revealTimerRef.current) clearInterval(revealTimerRef.current); };
   }, [currentIndex, autoRevealActive, isFlipped]);
 
+  // Keyboard shortcuts: Space = flip / Kann ich · 1 / Backspace / Delete = Nochmal
+  useEffect(() => {
+    if (isDone) return;
+    const handler = (e: KeyboardEvent) => {
+      // Don't fire when typing in an input/textarea
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      const cardId = deck?.cards[currentIndex]?.id;
+      if (!cardId) return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!isFlipped) {
+          setIsFlipped(true);
+        } else {
+          setKnown(p => [...p, cardId]);
+          advance();
+        }
+      }
+      if ((e.code === "Digit1" || e.key === "1" || e.key === "Backspace" || e.key === "Delete") && isFlipped) {
+        e.preventDefault();
+        setLearning(p => [...p, cardId]);
+        advance();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isFlipped, isDone, currentIndex, deck]);
+
   // Reset AI state when card changes
   useEffect(() => {
     setAiLevel(null);
@@ -197,8 +227,6 @@ export default function StudyPage() {
 
   const cards = deck.cards;
   const currentCard = cards[currentIndex];
-  const progress = (currentIndex / cards.length) * 100;
-
   const handleFlip = () => setIsFlipped(f => !f);
 
   const handleKnow = () => { setKnown(p => [...p, currentCard.id]); advance(); };
@@ -368,33 +396,30 @@ export default function StudyPage() {
         <p className="text-sm font-semibold tabular-nums">{currentIndex + 1} / {cards.length}</p>
       </div>
 
-      {/* Progress Bar */}
-      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-        <div className="h-2 rounded-full bg-primary transition-all duration-300" style={{ width: `${progress}%` }} />
-      </div>
-
-      {/* 20s countdown */}
-      {autoRevealActive && !isFlipped && (
-        <div className="-mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-1.5 rounded-full bg-primary/50 transition-all duration-1000"
-              style={{ width: `${(autoRevealSecs / 20) * 100}%` }}
-            />
+      {/* Quizlet-style progress */}
+      {(() => {
+        const answered = known.length + learning.length;
+        const pct = cards.length > 0 ? (answered / cards.length) * 100 : 0;
+        return (
+          <div className="flex items-center gap-3">
+            {/* Left: answered count */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white tabular-nums shadow-sm">
+              {answered}
+            </div>
+            {/* Bar */}
+            <div className="relative flex-1 h-2.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {/* Right: total count */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground tabular-nums">
+              {cards.length}
+            </div>
           </div>
-          <span className="tabular-nums text-[11px]">Aufdecken in {autoRevealSecs}s</span>
-        </div>
-      )}
-
-      {/* Stats Row */}
-      <div className="flex justify-center gap-6 text-sm">
-        <span className="flex items-center gap-1.5 font-medium text-emerald-600">
-          <CheckCircle2 className="h-4 w-4" />{known.length} Kann ich
-        </span>
-        <span className="flex items-center gap-1.5 font-medium text-rose-500">
-          <XCircle className="h-4 w-4" />{learning.length} Nochmal
-        </span>
-      </div>
+        );
+      })()}
 
       {/* Flashcard */}
       <div
@@ -418,6 +443,16 @@ export default function StudyPage() {
                 <Lightbulb className="h-3.5 w-3.5" />Antwort
               </div>
               <p className="text-center text-2xl font-semibold leading-snug">{currentCard.back}</p>
+              {currentCard.backImageUrl && (
+                <div className="mt-5 flex justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={currentCard.backImageUrl}
+                    alt="Antwortbild"
+                    className="max-h-28 max-w-full rounded-xl object-contain shadow-sm"
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -529,28 +564,27 @@ export default function StudyPage() {
         </div>
       )}
 
-      {/* Action Buttons */}
+      {/* Action Buttons — icon only */}
       <div
         className={cn(
-          "grid gap-3 transition-all duration-300",
-          isFlipped ? "grid-cols-2 opacity-100" : "grid-cols-1 opacity-40 pointer-events-none",
+          "flex justify-center gap-5 transition-all duration-300",
+          isFlipped ? "opacity-100" : "opacity-40 pointer-events-none",
         )}
       >
-        <Button
+        <button
           onClick={handleLearn}
-          variant="outline"
-          size="lg"
-          className="h-14 border-2 border-rose-200 text-rose-600 hover:border-rose-400 hover:bg-rose-50"
+          title="Kann ich nicht"
+          className="flex h-16 w-16 items-center justify-center rounded-full bg-rose-500 text-white shadow-md transition-all hover:bg-rose-600 hover:scale-105 active:scale-95"
         >
-          <XCircle className="mr-2 h-5 w-5" />Nochmal lernen
-        </Button>
-        <Button
+          <XCircle className="h-8 w-8" />
+        </button>
+        <button
           onClick={handleKnow}
-          size="lg"
-          className="h-14 bg-emerald-500 text-white hover:bg-emerald-600"
+          title="Kann ich!"
+          className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white shadow-md transition-all hover:bg-emerald-600 hover:scale-105 active:scale-95"
         >
-          <CheckCircle2 className="mr-2 h-5 w-5" />Kann ich das!
-        </Button>
+          <CheckCircle2 className="h-8 w-8" />
+        </button>
       </div>
 
       {!isFlipped && (
