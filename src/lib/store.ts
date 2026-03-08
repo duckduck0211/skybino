@@ -382,6 +382,11 @@ function getSRSStore(): SRSStore {
   } catch { return {}; }
 }
 
+/** Returns the full SRS store (all card states) for analytics. Key = `${deckId}:${cardId}` */
+export function getAllSRSStates(): SRSStore {
+  return getSRSStore();
+}
+
 export function getSRSState(deckId: string, cardId: string): SRSState | null {
   return getSRSStore()[`${deckId}:${cardId}`] ?? null;
 }

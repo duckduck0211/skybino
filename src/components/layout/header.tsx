@@ -22,9 +22,9 @@ import {
   Plus,
   FolderPlus,
   PlusCircle,
-  Wrench,
   CloudUpload,
   Check,
+  BarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -229,14 +229,6 @@ export function Header() {
                   iconBg: "bg-pink-100 dark:bg-pink-900/30",
                   iconColor: "text-pink-600 dark:text-pink-400",
                 },
-                {
-                  icon: Wrench,
-                  label: "Arbeitshilfe",
-                  description: "Lernhilfen & Tools",
-                  href: "#",
-                  iconBg: "bg-orange-100 dark:bg-orange-900/30",
-                  iconColor: "text-orange-600 dark:text-orange-400",
-                },
               ] as const).map(({ icon: Icon, label, description, href, iconBg, iconColor }) => (
                 <Link
                   key={label}
@@ -259,6 +251,15 @@ export function Header() {
       </div>
 
       <div className="flex-1" />
+
+      {/* ── Statistiken ── */}
+      <Link
+        href="/stats"
+        title="Statistiken"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+      >
+        <BarChart2 className="h-[18px] w-[18px]" strokeWidth={1.75} />
+      </Link>
 
       {/* ── Sync / Backup ── */}
       <button

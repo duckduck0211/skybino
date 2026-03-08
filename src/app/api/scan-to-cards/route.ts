@@ -9,9 +9,44 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { explanation } = await req.json() as { explanation: string };
-  if (!explanation?.trim()) {
-    return NextResponse.json({ error: "Keine Erklärung übermittelt." }, { status: 400 });
+  const body = await req.json() as {
+    explanation?: string;
+    imageBase64?: string;
+    mimeType?: string;
+    count?: number;
+  };
+
+  const count = body.count ?? 8;
+  const hasImage = !!body.imageBase64;
+  const hasText  = !!body.explanation?.trim();
+
+  if (!hasImage && !hasText) {
+    return NextResponse.json({ error: "Kein Inhalt übermittelt." }, { status: 400 });
+  }
+
+  const systemPrompt =
+    "Du bist ein Lernkarten-Generator. " +
+    `Erstelle ${count} Flashcards aus dem gegebenen Inhalt. ` +
+    "Jede Karte hat 'front' (kurze Frage oder Begriff) und 'back' (präzise Antwort). " +
+    "Antworte NUR mit einem JSON-Array, kein Text drum herum: " +
+    '[{"front": "...", "back": "..."}, ...]';
+
+  type MsgContent =
+    | string
+    | { type: string; text?: string; image_url?: { url: string } }[];
+
+  let userContent: MsgContent;
+  if (hasImage) {
+    const dataUrl = `data:${body.mimeType ?? "image/jpeg"};base64,${body.imageBase64}`;
+    const parts: { type: string; text?: string; image_url?: { url: string } }[] = [
+      { type: "image_url", image_url: { url: dataUrl } },
+    ];
+    if (hasText) {
+      parts.push({ type: "text", text: `Thema/Hinweis: ${body.explanation!.trim()}` });
+    }
+    userContent = parts;
+  } else {
+    userContent = `Erstelle Lernkarten aus diesem Inhalt:\n\n${body.explanation!.trim()}`;
   }
 
   const thauraRes = await fetch("https://backend.thaura.ai/v1/chat/completions", {
@@ -24,18 +59,8 @@ export async function POST(req: NextRequest) {
       model: "thaura",
       stream: false,
       messages: [
-        {
-          role: "system",
-          content:
-            "Du bist ein Lernkarten-Generator für die App Synapze. " +
-            "Erstelle aus dem gegebenen Lerninhalt 3-6 Flashcards im JSON-Format. " +
-            "Jede Karte hat 'front' (Frage) und 'back' (Antwort). Antworten kurz und präzise. " +
-            "Antworte NUR mit einem JSON-Array, kein Text drum herum: [{\"front\": \"...\", \"back\": \"...\"}]",
-        },
-        {
-          role: "user",
-          content: `Erstelle Lernkarten aus diesem Inhalt:\n\n${explanation}`,
-        },
+        { role: "system", content: systemPrompt },
+        { role: "user",   content: userContent },
       ],
     }),
   });
@@ -50,9 +75,8 @@ export async function POST(req: NextRequest) {
     choices?: { message?: { content?: string } }[];
   };
   const raw = data.choices?.[0]?.message?.content ?? "[]";
-
-  // Parse JSON from the response, strip possible markdown fences
   const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
   try {
     const cards = JSON.parse(cleaned) as { front: string; back: string }[];
     return NextResponse.json({ cards });

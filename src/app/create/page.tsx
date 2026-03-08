@@ -24,6 +24,7 @@ import {
   Repeat2,
   ChevronDown,
   Search,
+  ArrowLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -611,57 +612,195 @@ function ImageOcclusionCardRow({ card, onChange, onRemove, onTypeChange, index, 
 
 // ─── Smart Assist Panel ───────────────────────────────────────────────────────
 
-function SmartAssistPanel({ onClose }: { onClose: () => void }) {
-  const [prompt, setPrompt] = useState("");
-  const MAX = 100000;
+interface AICard { id: string; front: string; back: string }
+
+function SmartAssistPanel({
+  onClose,
+  onAddCards,
+}: {
+  onClose: () => void;
+  onAddCards: (cards: { front: string; back: string }[]) => void;
+}) {
+  const [step, setStep]           = useState<"input" | "preview">("input");
+  const [prompt, setPrompt]       = useState("");
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState("image/jpeg");
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+  const [generated, setGenerated] = useState<AICard[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const MAX = 100_000;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      const mime = result.match(/data:(.*);/)?.[1] ?? "image/jpeg";
+      setImageBase64(result.split(",")[1] ?? null);
+      setImageMime(mime);
+      setImagePreviewUrl(result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const generate = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = {};
+      if (imageBase64) { body.imageBase64 = imageBase64; body.mimeType = imageMime; }
+      if (prompt.trim()) body.explanation = prompt.trim();
+      const res = await fetch("/api/scan-to-cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json() as { cards?: { front: string; back: string }[]; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? "Fehler");
+      setGenerated((data.cards ?? []).map((c, i) => ({ id: `ai-${Date.now()}-${i}`, front: c.front, back: c.back })));
+      setStep("preview");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateCard = (id: string, field: "front" | "back", val: string) =>
+    setGenerated(g => g.map(c => c.id === id ? { ...c, [field]: val } : c));
+
+  const removeCard = (id: string) =>
+    setGenerated(g => g.filter(c => c.id !== id));
+
+  const handleAddAll = () => {
+    onAddCards(generated.map(({ front, back }) => ({ front, back })));
+    onClose();
+  };
 
   return (
-    <div className="fixed right-4 top-[72px] z-40 w-80 overflow-hidden rounded-2xl border bg-background shadow-2xl">
+    <div className="fixed right-4 top-[72px] z-40 flex w-80 flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl" style={{ maxHeight: "calc(100vh - 96px)" }}>
+
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-5 py-3.5">
+      <div className="flex shrink-0 items-center justify-between border-b px-5 py-3.5">
         <div className="flex items-center gap-2">
+          {step === "preview" && (
+            <button onClick={() => setStep("input")} className="flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
           <Sparkles className="h-4 w-4 text-violet-500" />
           <span className="text-sm font-semibold">KI-Assistent</span>
           <Badge className="text-[10px] px-1.5 py-0">Beta</Badge>
         </div>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+        <button onClick={onClose} className="text-muted-foreground transition-colors hover:text-foreground">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      {/* Body */}
-      <div className="p-4 space-y-3">
-        <div className="relative">
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value.slice(0, MAX))}
-            placeholder={'Gib einen Prompt ein (z. B. „Photosynthese zusammenfassen"), füge Notizen ein oder lade ein Dokument hoch, um Karteikarten zu erstellen.'}
-            rows={8}
-            className="w-full resize-none rounded-xl border bg-muted/30 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-          />
-          <span className="absolute bottom-3 right-3 text-[11px] text-muted-foreground">
-            {prompt.length.toLocaleString("de-DE")}/{MAX.toLocaleString("de-DE")}
-          </span>
-        </div>
+      {step === "input" ? (
+        <div className="p-4 space-y-3">
 
-        <div className="flex gap-2">
-          <Button variant="outline" className="flex-1 gap-2 rounded-full text-sm">
-            <Upload className="h-3.5 w-3.5" />
-            Hochladen
-          </Button>
-          <Button
-            disabled={!prompt.trim()}
-            className="flex-1 rounded-full text-sm"
-          >
-            Starten
-          </Button>
-        </div>
+          {/* Image preview */}
+          {imagePreviewUrl && (
+            <div className="relative overflow-hidden rounded-xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imagePreviewUrl} alt="Vorschau" className="h-28 w-full object-cover" />
+              <button
+                onClick={() => { setImageBase64(null); setImagePreviewUrl(null); }}
+                className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white transition-opacity hover:bg-black/80"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
 
-        <p className="text-center text-[11px] text-muted-foreground">
-          Verbessert durch KI{" "}
-          <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-muted-foreground/40 text-[9px] font-bold">i</span>
-        </p>
-      </div>
+          {/* Text input */}
+          <div className="relative">
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value.slice(0, MAX))}
+              placeholder={imagePreviewUrl ? "Optional: Hinweis oder Thema hinzufügen…" : "Stichwort, Thema oder Text einfügen…"}
+              rows={imagePreviewUrl ? 3 : 7}
+              className="w-full resize-none rounded-xl border bg-muted/30 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+            />
+            {prompt.length > 0 && (
+              <span className="absolute bottom-3 right-3 text-[10px] text-muted-foreground">
+                {prompt.length.toLocaleString("de-DE")}/{MAX.toLocaleString("de-DE")}
+              </span>
+            )}
+          </div>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="flex-1 gap-1.5 rounded-full" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="h-3.5 w-3.5" />
+              Hochladen
+            </Button>
+            <Button
+              size="sm"
+              disabled={loading || (!prompt.trim() && !imageBase64)}
+              className="flex-1 rounded-full"
+              onClick={generate}
+            >
+              {loading ? (
+                <span className="flex items-center gap-1.5">
+                  <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                  </svg>
+                  Lädt…
+                </span>
+              ) : "Starten"}
+            </Button>
+          </div>
+
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+
+          <p className="text-center text-[11px] text-muted-foreground">Verbessert durch KI</p>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 space-y-2 overflow-y-auto p-3">
+            {generated.map((card, idx) => (
+              <div key={card.id} className="rounded-xl border bg-muted/20 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Karte {idx + 1}</span>
+                  <button onClick={() => removeCard(card.id)} className="text-muted-foreground transition-colors hover:text-destructive">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <input
+                  value={card.front}
+                  onChange={(e) => updateCard(card.id, "front", e.target.value)}
+                  className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Vorderseite"
+                />
+                <input
+                  value={card.back}
+                  onChange={(e) => updateCard(card.id, "back", e.target.value)}
+                  className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Rückseite"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="shrink-0 space-y-2 border-t p-3">
+            <Button className="w-full gap-2 rounded-xl" onClick={handleAddAll} disabled={generated.length === 0}>
+              <Plus className="h-4 w-4" />
+              {generated.length} Karte{generated.length !== 1 ? "n" : ""} hinzufügen
+            </Button>
+            <Button variant="outline" size="sm" className="w-full rounded-xl text-xs" onClick={() => setStep("input")}>
+              Neu generieren
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1067,7 +1206,20 @@ function CreatePageInner() {
       </div>
 
       {/* ── Smart Assist Panel ── */}
-      {smartAssistOpen && <SmartAssistPanel onClose={() => setSmartAssistOpen(false)} />}
+      {smartAssistOpen && (
+        <SmartAssistPanel
+          onClose={() => setSmartAssistOpen(false)}
+          onAddCards={(aiCards) => {
+            const newCards: BasicCard[] = aiCards.map((c, i) => ({
+              id: `ai-${Date.now()}_${i}`,
+              type: "basic",
+              front: c.front,
+              back: c.back,
+            }));
+            setCards(prev => [...prev, ...newCards]);
+          }}
+        />
+      )}
     </div>
   );
 }
